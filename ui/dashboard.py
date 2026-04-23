@@ -20,17 +20,31 @@ from core.driver_analyzer import analyze_drivers
 from core.ml_model import load_threat_data, detect_threats, load_model
 from core.anomaly_engine import detect_anomalies
 
+# =========================
+# PROFESSIONAL UI THEME OVERRIDE
+# =========================
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-plt.rcParams['figure.facecolor'] = '#0d1117'
-plt.rcParams['axes.facecolor'] = '#161b22'
-plt.rcParams['axes.edgecolor'] = '#30363d'
-plt.rcParams['text.color'] = '#8b949e'
-plt.rcParams['axes.labelcolor'] = '#8b949e'
-plt.rcParams['xtick.color'] = '#8b949e'
-plt.rcParams['ytick.color'] = '#8b949e'
-plt.rcParams['grid.color'] = '#21262d'
+# HUD Color Palette
+BG_COLOR = "#050505"         # Pure deep black
+CARD_COLOR = "#0F0F11"       # Slightly elevated black for panels
+ACCENT_BLUE = "#00E5FF"      # Cyber/Neon Blue
+ACCENT_GREEN = "#00FF41"     # Matrix Green
+ACCENT_RED = "#FF003C"       # Alert Red
+ACCENT_WARN = "#FFB000"      # Warning Orange
+TEXT_MAIN = "#FFFFFF"        # Crisp White
+TEXT_MUTED = "#A1A1AA"       # Brighter Zinc Grey for high visibility
+
+# Stealth Matplotlib Styling
+plt.rcParams['figure.facecolor'] = CARD_COLOR
+plt.rcParams['axes.facecolor'] = CARD_COLOR
+plt.rcParams['axes.edgecolor'] = CARD_COLOR
+plt.rcParams['text.color'] = TEXT_MUTED
+plt.rcParams['axes.labelcolor'] = TEXT_MUTED
+plt.rcParams['xtick.color'] = TEXT_MUTED
+plt.rcParams['ytick.color'] = TEXT_MUTED
+plt.rcParams['grid.color'] = '#1A1A1A'
 
 PREDICTOR_MODEL = "data/boot_predictor.pkl"
 SUMMARY_FILE = "data/boot_summary.csv"
@@ -44,42 +58,42 @@ def silent(func, *args, **kwargs):
         sys.stdout = old
     return result
 
-
 # =========================
-# GAUGE WIDGET
+# GAUGE WIDGET (Sleeker, Thinner Arcs)
 # =========================
 class GaugeCanvas(ctk.CTkFrame):
     def __init__(self, parent, title, color, **kwargs):
-        super().__init__(parent, fg_color="#161b22", corner_radius=10,
-                         border_width=1, border_color="#30363d", **kwargs)
+        super().__init__(parent, fg_color=CARD_COLOR, corner_radius=8,
+                         border_width=0, **kwargs)
         self.color = color
         self._last_value = -1
         self._arc = None
         self._value_text = None
         self._sub_text = None
 
-        self.canvas = ctk.CTkCanvas(self, bg="#161b22",
-                                     highlightthickness=0, width=220, height=160)
-        self.canvas.pack(pady=(8, 0))
+        self.canvas = ctk.CTkCanvas(self, bg=CARD_COLOR,
+                                     highlightthickness=0, width=220, height=140)
+        self.canvas.pack(pady=(15, 0))
 
         ctk.CTkLabel(self, text=title,
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(pady=(2, 8))
+                     font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                     text_color=TEXT_MUTED).pack(pady=(0, 10))
 
         self.canvas.after(100, self._draw_background)
 
     def _draw_background(self):
-        self.canvas.create_arc(20, 10, 200, 150, start=0, extent=180,
-                                style="arc", outline="#21262d", width=18)
+        # Thinner, sleeker arcs
+        self.canvas.create_arc(25, 10, 195, 140, start=0, extent=180,
+                                style="arc", outline="#1A1A1A", width=8)
         self._value_text = self.canvas.create_text(
-            110, 110, text="--", font=("Arial", 28, "bold"), fill="white"
+            110, 100, text="--", font=("Inter", 42, "bold"), fill=TEXT_MAIN
         )
         self._sub_text = self.canvas.create_text(
-            110, 135, text="", font=("Arial", 8), fill="#8b949e"
+            110, 130, text="", font=("Consolas", 11), fill=TEXT_MUTED
         )
         self._arc = self.canvas.create_arc(
-            20, 10, 200, 150, start=180, extent=0,
-            style="arc", outline=self.color, width=18
+            25, 10, 195, 140, start=180, extent=0,
+            style="arc", outline=self.color, width=8
         )
 
     def update_value(self, value, subtitle=""):
@@ -93,7 +107,6 @@ class GaugeCanvas(ctk.CTkFrame):
         self.canvas.itemconfig(self._value_text, text=str(int(value)))
         self.canvas.itemconfig(self._sub_text, text=subtitle)
 
-
 # =========================
 # MAIN DASHBOARD
 # =========================
@@ -103,7 +116,7 @@ class AIBootDashboard(ctk.CTk):
         self.title("AI-Based E-Booting Optimization System")
         self.geometry("1400x850")
         self.resizable(True, True)
-        self.configure(fg_color="#0d1117")
+        self.configure(fg_color=BG_COLOR)
         self.running = True
 
         self.cpu_history = [0] * 30
@@ -139,135 +152,141 @@ class AIBootDashboard(ctk.CTk):
     # BUILD UI
     # =========================
     def build_ui(self):
-        # Title Bar
-        title_frame = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=0, height=55)
-        title_frame.pack(fill="x")
+        # Stealth Title Bar
+        title_frame = ctk.CTkFrame(self, fg_color=BG_COLOR, corner_radius=0, height=60)
+        title_frame.pack(fill="x", pady=(10, 0))
         title_frame.pack_propagate(False)
 
+        # Reverted back to simple title with adjusted size
         ctk.CTkLabel(
             title_frame,
             text="⚡ AI-Based E-Booting Optimization System",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#58a6ff"
-        ).pack(side="left", padx=20, pady=15)
+            font=ctk.CTkFont(family="Inter", size=18, weight="bold"),
+            text_color=ACCENT_BLUE
+        ).pack(side="left", padx=25, pady=15)
 
-        ctk.CTkLabel(
-            title_frame, text="● LIVE",
-            font=ctk.CTkFont(size=12), text_color="#3fb950"
-        ).pack(side="right", padx=20)
+        status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
+        status_frame.pack(side="right", padx=25)
+        
+        # Simple live indicator
+        ctk.CTkLabel(status_frame, text="●", font=ctk.CTkFont(size=18), text_color=ACCENT_GREEN).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(status_frame, text="LIVE", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
 
         # Main container
         main = ctk.CTkFrame(self, fg_color="transparent")
-        main.pack(fill="both", expand=True, padx=12, pady=10)
+        main.pack(fill="both", expand=True, padx=20, pady=10)
 
         # =========================
         # LEFT COLUMN
         # =========================
-        left = ctk.CTkFrame(main, fg_color="transparent", width=340)
-        left.pack(side="left", fill="y", padx=(0, 8))
+        left = ctk.CTkFrame(main, fg_color="transparent", width=380)
+        left.pack(side="left", fill="y", padx=(0, 15))
         left.pack_propagate(False)
 
         # Gauges
         gauge_frame = ctk.CTkFrame(left, fg_color="transparent")
         gauge_frame.pack(fill="x")
 
-        self.health_gauge = GaugeCanvas(gauge_frame, "Health Score", "#3fb950")
-        self.health_gauge.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        self.health_gauge = GaugeCanvas(gauge_frame, "Health Score", ACCENT_GREEN)
+        self.health_gauge.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        self.reboot_gauge = GaugeCanvas(gauge_frame, "Reboot Score", "#f0883e")
-        self.reboot_gauge.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        self.reboot_gauge = GaugeCanvas(gauge_frame, "Reboot Score", ACCENT_WARN)
+        self.reboot_gauge.pack(side="left", fill="both", expand=True, padx=(5, 0))
 
-        # Boot time card
-        boot_card = ctk.CTkFrame(left, fg_color="#161b22", corner_radius=10,
-                                  border_width=1, border_color="#30363d")
-        boot_card.pack(fill="x", pady=(8, 0))
+        # Boot time card (Minimalist)
+        boot_card = ctk.CTkFrame(left, fg_color=CARD_COLOR, corner_radius=8)
+        boot_card.pack(fill="x", pady=(10, 0))
 
+        # Adjusted text and size for latency
         ctk.CTkLabel(boot_card, text="Predicted Boot Time",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(boot_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
+                     font=ctk.CTkFont(family="Inter", size=11, weight="bold"),
+                     text_color=TEXT_MUTED).pack(anchor="w", padx=15, pady=(15, 0))
 
+        # Reduced font size for sec output
         self.boot_label = ctk.CTkLabel(boot_card, text="-- sec",
-                                        font=ctk.CTkFont(size=36, weight="bold"),
-                                        text_color="#58a6ff")
-        self.boot_label.pack(pady=(8, 2))
+                                        font=ctk.CTkFont(family="Inter", size=36, weight="bold"),
+                                        text_color=TEXT_MAIN)
+        self.boot_label.pack(pady=(8, 0))
         self.boot_sub = ctk.CTkLabel(boot_card, text="Loading...",
-                                      font=ctk.CTkFont(size=11), text_color="#8b949e")
-        self.boot_sub.pack(pady=(0, 10))
+                                      font=ctk.CTkFont(family="Consolas", size=12), text_color=TEXT_MUTED)
+        self.boot_sub.pack(pady=(0, 18))
 
         # CPU / RAM stats
         stats_frame = ctk.CTkFrame(left, fg_color="transparent")
-        stats_frame.pack(fill="x", pady=8)
+        stats_frame.pack(fill="x", pady=10)
 
-        self.cpu_stat = self._make_stat(stats_frame, "CPU", "0%", "#f0883e")
-        self.cpu_stat.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        self.cpu_stat = self._make_stat(stats_frame, "CPU", "0%", ACCENT_WARN)
+        self.cpu_stat.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        self.ram_stat = self._make_stat(stats_frame, "RAM", "0%", "#58a6ff")
-        self.ram_stat.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        self.ram_stat = self._make_stat(stats_frame, "RAM", "0%", ACCENT_BLUE)
+        self.ram_stat.pack(side="left", fill="both", expand=True, padx=(5, 0))
 
         # =========================
         # REBOOT INTELLIGENCE PANEL
         # =========================
-        reboot_card = ctk.CTkFrame(left, fg_color="#161b22", corner_radius=10,
-                                    border_width=1, border_color="#30363d")
+        reboot_card = ctk.CTkFrame(left, fg_color=CARD_COLOR, corner_radius=8)
         reboot_card.pack(fill="both", expand=True)
 
         ctk.CTkLabel(reboot_card, text="🧠 Reboot Intelligence",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(reboot_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
+                     font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                     text_color=TEXT_MUTED).pack(anchor="w", padx=15, pady=(15, 2))
 
-        # Status label
         self.reboot_status_label = ctk.CTkLabel(
             reboot_card, text="Checking...",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#3fb950"
+            font=ctk.CTkFont(family="Consolas", size=15, weight="bold"),
+            text_color=ACCENT_GREEN
         )
-        self.reboot_status_label.pack(anchor="w", padx=12, pady=(6, 2))
+        self.reboot_status_label.pack(anchor="w", padx=15, pady=(2, 8))
 
-        # Anomalies + recommendations text
+        # Terminal-style text box
         self.reboot_text = ctk.CTkTextbox(
-            reboot_card, fg_color="#0d1117",
-            text_color="#8b949e",
-            font=ctk.CTkFont(family="Consolas", size=11),
-            wrap="word", height=160
+            reboot_card, fg_color=BG_COLOR, # Darker inset
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(family="Consolas", size=13),
+            border_width=0, wrap="word", height=140
         )
-        self.reboot_text.pack(fill="both", expand=True, padx=5, pady=(2, 5))
+        self.reboot_text.pack(fill="both", expand=True, padx=10, pady=(0, 12))
         self.reboot_text.insert("end", "Loading...")
         self.reboot_text.configure(state="disabled")
 
-        # Action buttons
+        # Action buttons (Flat & Modern)
         btn_frame = ctk.CTkFrame(reboot_card, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=8, pady=(0, 10))
+        btn_frame.pack(fill="x", padx=10, pady=(0, 15))
 
         self.reboot_btn = ctk.CTkButton(
             btn_frame,
             text="🔄 Reboot Now",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#f85149",
-            hover_color="#da3633",
+            font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            fg_color=ACCENT_RED,
+            text_color=TEXT_MAIN,
+            hover_color="#CC0030",
+            corner_radius=4,
             command=self._reboot_now,
+            height=36,
             width=140
         )
-        self.reboot_btn.pack(side="left", padx=(0, 6))
+        self.reboot_btn.pack(side="left", padx=(0, 10))
 
         self.ignore_btn = ctk.CTkButton(
             btn_frame,
             text="✕ Ignore",
-            font=ctk.CTkFont(size=11),
-            fg_color="#21262d",
-            hover_color="#30363d",
+            font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            fg_color="#1A1A1A",
+            text_color=TEXT_MUTED,
+            hover_color="#2A2A2A",
+            corner_radius=4,
             command=self._ignore_reboot,
-            width=100
+            height=36,
+            width=110
         )
         self.ignore_btn.pack(side="left")
 
         self.ignored_label = ctk.CTkLabel(
             reboot_card, text="",
-            font=ctk.CTkFont(size=10),
-            text_color="#8b949e"
+            font=ctk.CTkFont(family="Consolas", size=12),
+            text_color=TEXT_MUTED
         )
-        self.ignored_label.pack(pady=(0, 6))
+        self.ignored_label.pack(pady=(0, 10))
 
         # =========================
         # RIGHT COLUMN
@@ -275,21 +294,25 @@ class AIBootDashboard(ctk.CTk):
         right = ctk.CTkFrame(main, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
-        # Graph
-        graph_card = ctk.CTkFrame(right, fg_color="#161b22", corner_radius=10,
-                                   border_width=1, border_color="#30363d")
-        graph_card.pack(fill="both", expand=True, pady=(0, 8))
+        # Graph (Seamless Integration)
+        graph_card = ctk.CTkFrame(right, fg_color=CARD_COLOR, corner_radius=8)
+        graph_card.pack(fill="both", expand=True, pady=(0, 10))
 
         ctk.CTkLabel(graph_card, text="📈 Live System Performance",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(graph_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
+                     font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                     text_color=TEXT_MUTED).pack(anchor="w", padx=15, pady=(15, 0))
 
         self.fig = Figure(figsize=(6, 3), dpi=80)
         self.ax = self.fig.add_subplot(111)
-        self.fig.subplots_adjust(left=0.08, right=0.97, top=0.88, bottom=0.15)
+        self.fig.subplots_adjust(left=0.06, right=0.98, top=0.90, bottom=0.18)
         self.graph_canvas = FigureCanvasTkAgg(self.fig, master=graph_card)
         self.graph_canvas.get_tk_widget().pack(fill="both", expand=True, padx=8, pady=8)
+        
+        # Remove top and right borders on graph for sleekness
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['left'].set_color('#1A1A1A')
+        self.ax.spines['bottom'].set_color('#1A1A1A')
         self._draw_graph()
 
         # Bottom row
@@ -297,147 +320,136 @@ class AIBootDashboard(ctk.CTk):
         bottom_row.pack(fill="both", expand=True)
 
         # Threat panel
-        threat_card = ctk.CTkFrame(bottom_row, fg_color="#161b22", corner_radius=10,
-                                    border_width=1, border_color="#30363d")
-        threat_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
-
-        ctk.CTkLabel(threat_card, text="🔍 Threat Detection",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(threat_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
-
-        self.threat_text = ctk.CTkTextbox(threat_card, fg_color="#0d1117",
-                                           text_color="#f0883e",
-                                           font=ctk.CTkFont(family="Consolas", size=11),
-                                           wrap="word")
-        self.threat_text.pack(fill="both", expand=True, padx=5, pady=5)
-        self.threat_text.insert("end", "Loading...")
-        self.threat_text.configure(state="disabled")
+        threat_card = self._make_log_card(bottom_row, "🔍 Threat Detection", ACCENT_WARN)
+        threat_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        self.threat_text = threat_card.textbox
 
         # Driver panel
-        driver_card = ctk.CTkFrame(bottom_row, fg_color="#161b22", corner_radius=10,
-                                    border_width=1, border_color="#30363d")
-        driver_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
-
-        ctk.CTkLabel(driver_card, text="🔧 Driver Health",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(driver_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
-
-        self.driver_text = ctk.CTkTextbox(driver_card, fg_color="#0d1117",
-                                           text_color="#8b949e",
-                                           font=ctk.CTkFont(family="Consolas", size=11),
-                                           wrap="word")
-        self.driver_text.pack(fill="both", expand=True, padx=5, pady=5)
-        self.driver_text.insert("end", "Loading...")
-        self.driver_text.configure(state="disabled")
+        driver_card = self._make_log_card(bottom_row, "🔧 Driver Health", TEXT_MUTED)
+        driver_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        self.driver_text = driver_card.textbox
 
         # Process panel
-        proc_card = ctk.CTkFrame(bottom_row, fg_color="#161b22", corner_radius=10,
-                                  border_width=1, border_color="#30363d")
+        proc_card = self._make_log_card(bottom_row, "💾 Top Memory Processes", ACCENT_BLUE)
         proc_card.pack(side="left", fill="both", expand=True)
-
-        ctk.CTkLabel(proc_card, text="💾 Top Memory Processes",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(proc_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
-
-        self.process_text = ctk.CTkTextbox(proc_card, fg_color="#0d1117",
-                                            text_color="#58a6ff",
-                                            font=ctk.CTkFont(family="Consolas", size=11),
-                                            wrap="word")
-        self.process_text.pack(fill="both", expand=True, padx=5, pady=5)
-        self.process_text.insert("end", "Loading...")
-        self.process_text.configure(state="disabled")
+        self.process_text = proc_card.textbox
 
         # Bottom bar
-        bar = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=0, height=32)
-        bar.pack(fill="x", side="bottom")
+        bar = ctk.CTkFrame(self, fg_color="transparent", height=35)
+        bar.pack(fill="x", side="bottom", pady=(0, 5))
         bar.pack_propagate(False)
 
         self.last_update = ctk.CTkLabel(bar, text="Last updated: --",
-                                         font=ctk.CTkFont(size=11), text_color="#8b949e")
-        self.last_update.pack(side="left", padx=15, pady=8)
+                                         font=ctk.CTkFont(family="Consolas", size=13), text_color=TEXT_MUTED)
+        self.last_update.pack(side="left", padx=25)
         ctk.CTkLabel(bar, text="Auto-refresh: 15s",
-                     font=ctk.CTkFont(size=11), text_color="#8b949e").pack(side="right", padx=15)
+                     font=ctk.CTkFont(family="Consolas", size=13), text_color=TEXT_MUTED).pack(side="right", padx=25)
 
     # =========================
     # HELPERS
     # =========================
     def _make_stat(self, parent, label, value, color):
-        frame = ctk.CTkFrame(parent, fg_color="#161b22", corner_radius=10,
-                              border_width=1, border_color="#30363d")
-        ctk.CTkLabel(frame, text=label, font=ctk.CTkFont(size=11),
-                     text_color="#8b949e").pack(pady=(8, 0))
+        frame = ctk.CTkFrame(parent, fg_color=CARD_COLOR, corner_radius=8)
+        ctk.CTkLabel(frame, text=label, font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                     text_color=TEXT_MUTED).pack(pady=(15, 0))
         lbl = ctk.CTkLabel(frame, text=value,
-                           font=ctk.CTkFont(size=22, weight="bold"), text_color=color)
-        lbl.pack(pady=(0, 8))
+                           font=ctk.CTkFont(family="Inter", size=34, weight="bold"), text_color=color)
+        lbl.pack(pady=(0, 15))
         frame.value_label = lbl
         return frame
+
+    def _make_log_card(self, parent, title, text_color):
+        card = ctk.CTkFrame(parent, fg_color=CARD_COLOR, corner_radius=8)
+        ctk.CTkLabel(card, text=title,
+                     font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+                     text_color=TEXT_MUTED).pack(anchor="w", padx=15, pady=(15, 5))
+        
+        tb = ctk.CTkTextbox(card, fg_color=BG_COLOR, text_color=text_color,
+                            font=ctk.CTkFont(family="Consolas", size=13),
+                            border_width=0, wrap="word")
+        tb.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        tb.insert("end", "Loading...")
+        tb.configure(state="disabled")
+        card.textbox = tb
+        return card
 
     def _draw_graph(self):
         self.ax.clear()
         x = list(range(30))
-        self.ax.plot(x, self.cpu_history, color='#f0883e', linewidth=2, label='CPU %')
-        self.ax.fill_between(x, self.cpu_history, alpha=0.15, color='#f0883e')
-        self.ax.plot(x, self.ram_history, color='#58a6ff', linewidth=2, label='RAM %')
-        self.ax.fill_between(x, self.ram_history, alpha=0.15, color='#58a6ff')
+        
+        # Neon glowing effect styling
+        self.ax.plot(x, self.cpu_history, color=ACCENT_WARN, linewidth=2, label='CPU %')
+        self.ax.fill_between(x, self.cpu_history, alpha=0.08, color=ACCENT_WARN)
+        
+        self.ax.plot(x, self.ram_history, color=ACCENT_BLUE, linewidth=2, label='RAM %')
+        self.ax.fill_between(x, self.ram_history, alpha=0.15, color=ACCENT_BLUE)
+        
         self.ax.set_ylim(0, 100)
         self.ax.set_xlim(0, 29)
-        self.ax.legend(loc='upper left', fontsize=9,
-                       facecolor='#161b22', edgecolor='#30363d')
-        self.ax.grid(True, alpha=0.3)
-        self.ax.set_title("CPU & RAM Usage (Last 30 readings)",
-                          fontsize=10, color='#8b949e', pad=8)
+        
+        # Sleek legend with increased font
+        self.ax.legend(loc='upper right', fontsize=10,
+                       facecolor=CARD_COLOR, edgecolor=CARD_COLOR, labelcolor=TEXT_MAIN)
+        self.ax.grid(True, alpha=0.2, color='#1A1A1A', linestyle='--')
+        
+        # Ensure spines stay hidden after clear
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['left'].set_color('#1A1A1A')
+        self.ax.spines['bottom'].set_color('#1A1A1A')
+        self.ax.tick_params(axis='both', colors=TEXT_MUTED, labelsize=10)
+
         self.graph_canvas.draw()
 
     # =========================
     # REBOOT ACTIONS
     # =========================
     def _reboot_now(self):
-        """Show confirmation before rebooting."""
+        """Show confirmation before rebooting, centered on screen."""
         dialog = ctk.CTkToplevel(self)
         dialog.title("Confirm Reboot")
-        dialog.geometry("360x160")
-        dialog.configure(fg_color="#161b22")
+        
+        # Calculate screen center logic
+        width = 380
+        height = 180
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+        
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.configure(fg_color=BG_COLOR)
         dialog.grab_set()
         dialog.resizable(False, False)
 
         ctk.CTkLabel(
             dialog,
             text="Are you sure you want to reboot now?",
-            font=ctk.CTkFont(size=13),
-            text_color="white",
-            wraplength=300
+            font=ctk.CTkFont(family="Inter", size=14, weight="bold"),
+            text_color=ACCENT_RED
         ).pack(pady=(25, 5))
 
         ctk.CTkLabel(
             dialog,
             text="Save all work before proceeding.",
-            font=ctk.CTkFont(size=11),
-            text_color="#8b949e"
-        ).pack(pady=(0, 15))
+            font=ctk.CTkFont(family="Consolas", size=12),
+            text_color=TEXT_MUTED
+        ).pack(pady=(0, 25))
 
         btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_row.pack()
 
         ctk.CTkButton(
-            btn_row,
-            text="Yes, Reboot",
-            fg_color="#f85149",
-            hover_color="#da3633",
-            command=lambda: os.system("shutdown /r /t 10"),
-            width=130
-        ).pack(side="left", padx=8)
+            btn_row, text="Yes, Reboot", fg_color=ACCENT_RED, text_color=TEXT_MAIN,
+            hover_color="#CC0030", font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            command=lambda: os.system("shutdown /r /t 10"), width=130, height=36, corner_radius=4
+        ).pack(side="left", padx=12)
 
         ctk.CTkButton(
-            btn_row,
-            text="Cancel",
-            fg_color="#21262d",
-            hover_color="#30363d",
-            command=dialog.destroy,
-            width=100
-        ).pack(side="left", padx=8)
+            btn_row, text="Cancel", fg_color="#1A1A1A", text_color=TEXT_MUTED,
+            hover_color="#2A2A2A", font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            command=dialog.destroy, width=130, height=36, corner_radius=4
+        ).pack(side="left", padx=12)
 
     def _ignore_reboot(self):
         """Ignore reboot suggestion for this session."""
@@ -547,8 +559,8 @@ class AIBootDashboard(ctk.CTk):
 
                 self.health_gauge.update_value(score, f"CPU:{cpu}% RAM:{ram}%")
 
-                cpu_color = "#3fb950" if cpu < 60 else "#f0883e" if cpu < 85 else "#f85149"
-                ram_color = "#3fb950" if ram < 60 else "#f0883e" if ram < 85 else "#f85149"
+                cpu_color = ACCENT_GREEN if cpu < 60 else ACCENT_WARN if cpu < 85 else ACCENT_RED
+                ram_color = ACCENT_BLUE if ram < 60 else ACCENT_WARN if ram < 85 else ACCENT_RED
                 self.cpu_stat.value_label.configure(text=f"{cpu}%", text_color=cpu_color)
                 self.ram_stat.value_label.configure(text=f"{ram}%", text_color=ram_color)
 
@@ -565,11 +577,11 @@ class AIBootDashboard(ctk.CTk):
                 status = a['reboot_status']
 
                 # Update reboot gauge
-                gauge_color = "#3fb950" if score < 30 else "#f0883e" if score < 60 else "#f85149"
+                gauge_color = ACCENT_GREEN if score < 30 else ACCENT_WARN if score < 60 else ACCENT_RED
                 self.reboot_gauge.update_value(score, status)
 
                 # Update status label color
-                label_color = "#3fb950" if score < 30 else "#f0883e" if score < 60 else "#f85149"
+                label_color = ACCENT_GREEN if score < 30 else ACCENT_WARN if score < 60 else ACCENT_RED
                 self.reboot_status_label.configure(
                     text=f"{'✓' if score < 30 else '⚠'} {status}",
                     text_color=label_color
@@ -667,3 +679,8 @@ class AIBootDashboard(ctk.CTk):
     def on_closing(self):
         self.running = False
         self.destroy()
+
+if __name__ == "__main__":
+    app = AIBootDashboard()
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()
