@@ -7,18 +7,18 @@ import math
 import psutil
 import joblib
 import os
+import subprocess
 import pandas as pd
 import customtkinter as ctk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
-from core.anomaly_engine import detect_anomalies
 
-# Core imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.health_monitor import get_system_health, calculate_health_score
 from core.driver_analyzer import analyze_drivers
 from core.ml_model import load_threat_data, detect_threats, load_model
+from core.anomaly_engine import detect_anomalies
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -45,6 +45,9 @@ def silent(func, *args, **kwargs):
     return result
 
 
+# =========================
+# GAUGE WIDGET
+# =========================
 class GaugeCanvas(ctk.CTkFrame):
     def __init__(self, parent, title, color, **kwargs):
         super().__init__(parent, fg_color="#161b22", corner_radius=10,
@@ -91,11 +94,14 @@ class GaugeCanvas(ctk.CTkFrame):
         self.canvas.itemconfig(self._sub_text, text=subtitle)
 
 
+# =========================
+# MAIN DASHBOARD
+# =========================
 class AIBootDashboard(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("AI-Based E-Booting Optimization System")
-        self.geometry("1300x800")
+        self.geometry("1400x850")
         self.resizable(True, True)
         self.configure(fg_color="#0d1117")
         self.running = True
@@ -107,6 +113,7 @@ class AIBootDashboard(ctk.CTk):
         self._predictor_model = None
         self._driver_cache = None
         self._driver_last_scan = 0
+        self._reboot_ignored = False
 
         self.build_ui()
         threading.Thread(target=self._preload, daemon=True).start()
@@ -121,7 +128,6 @@ class AIBootDashboard(ctk.CTk):
             print(f"Model load error: {e}")
 
         try:
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from retrain import run_retrain
             silent(run_retrain)
         except Exception as e:
@@ -129,6 +135,9 @@ class AIBootDashboard(ctk.CTk):
 
         self.after(0, self.start_refresh_thread)
 
+    # =========================
+    # BUILD UI
+    # =========================
     def build_ui(self):
         # Title Bar
         title_frame = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=0, height=55)
@@ -151,8 +160,10 @@ class AIBootDashboard(ctk.CTk):
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill="both", expand=True, padx=12, pady=10)
 
-        # Left column
-        left = ctk.CTkFrame(main, fg_color="transparent", width=320)
+        # =========================
+        # LEFT COLUMN
+        # =========================
+        left = ctk.CTkFrame(main, fg_color="transparent", width=340)
         left.pack(side="left", fill="y", padx=(0, 8))
         left.pack_propagate(False)
 
@@ -169,7 +180,7 @@ class AIBootDashboard(ctk.CTk):
         # Boot time card
         boot_card = ctk.CTkFrame(left, fg_color="#161b22", corner_radius=10,
                                   border_width=1, border_color="#30363d")
-        boot_card.pack(fill="x", pady=8)
+        boot_card.pack(fill="x", pady=(8, 0))
 
         ctk.CTkLabel(boot_card, text="Predicted Boot Time",
                      font=ctk.CTkFont(size=12, weight="bold"),
@@ -186,7 +197,7 @@ class AIBootDashboard(ctk.CTk):
 
         # CPU / RAM stats
         stats_frame = ctk.CTkFrame(left, fg_color="transparent")
-        stats_frame.pack(fill="x", pady=(0, 8))
+        stats_frame.pack(fill="x", pady=8)
 
         self.cpu_stat = self._make_stat(stats_frame, "CPU", "0%", "#f0883e")
         self.cpu_stat.pack(side="left", fill="both", expand=True, padx=(0, 4))
@@ -194,25 +205,73 @@ class AIBootDashboard(ctk.CTk):
         self.ram_stat = self._make_stat(stats_frame, "RAM", "0%", "#58a6ff")
         self.ram_stat.pack(side="left", fill="both", expand=True, padx=(4, 0))
 
-        # Threat panel
-        threat_card = ctk.CTkFrame(left, fg_color="#161b22", corner_radius=10,
+        # =========================
+        # REBOOT INTELLIGENCE PANEL
+        # =========================
+        reboot_card = ctk.CTkFrame(left, fg_color="#161b22", corner_radius=10,
                                     border_width=1, border_color="#30363d")
-        threat_card.pack(fill="both", expand=True)
+        reboot_card.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(threat_card, text="🔍 Threat Detection",
+        ctk.CTkLabel(reboot_card, text="🧠 Reboot Intelligence",
                      font=ctk.CTkFont(size=12, weight="bold"),
                      text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkFrame(threat_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
+        ctk.CTkFrame(reboot_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
 
-        self.threat_text = ctk.CTkTextbox(threat_card, fg_color="#0d1117",
-                                           text_color="#f0883e",
-                                           font=ctk.CTkFont(family="Consolas", size=11),
-                                           wrap="word")
-        self.threat_text.pack(fill="both", expand=True, padx=5, pady=5)
-        self.threat_text.insert("end", "Loading...")
-        self.threat_text.configure(state="disabled")
+        # Status label
+        self.reboot_status_label = ctk.CTkLabel(
+            reboot_card, text="Checking...",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#3fb950"
+        )
+        self.reboot_status_label.pack(anchor="w", padx=12, pady=(6, 2))
 
-        # Right column
+        # Anomalies + recommendations text
+        self.reboot_text = ctk.CTkTextbox(
+            reboot_card, fg_color="#0d1117",
+            text_color="#8b949e",
+            font=ctk.CTkFont(family="Consolas", size=11),
+            wrap="word", height=160
+        )
+        self.reboot_text.pack(fill="both", expand=True, padx=5, pady=(2, 5))
+        self.reboot_text.insert("end", "Loading...")
+        self.reboot_text.configure(state="disabled")
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(reboot_card, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=8, pady=(0, 10))
+
+        self.reboot_btn = ctk.CTkButton(
+            btn_frame,
+            text="🔄 Reboot Now",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#f85149",
+            hover_color="#da3633",
+            command=self._reboot_now,
+            width=140
+        )
+        self.reboot_btn.pack(side="left", padx=(0, 6))
+
+        self.ignore_btn = ctk.CTkButton(
+            btn_frame,
+            text="✕ Ignore",
+            font=ctk.CTkFont(size=11),
+            fg_color="#21262d",
+            hover_color="#30363d",
+            command=self._ignore_reboot,
+            width=100
+        )
+        self.ignore_btn.pack(side="left")
+
+        self.ignored_label = ctk.CTkLabel(
+            reboot_card, text="",
+            font=ctk.CTkFont(size=10),
+            text_color="#8b949e"
+        )
+        self.ignored_label.pack(pady=(0, 6))
+
+        # =========================
+        # RIGHT COLUMN
+        # =========================
         right = ctk.CTkFrame(main, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
@@ -236,6 +295,24 @@ class AIBootDashboard(ctk.CTk):
         # Bottom row
         bottom_row = ctk.CTkFrame(right, fg_color="transparent")
         bottom_row.pack(fill="both", expand=True)
+
+        # Threat panel
+        threat_card = ctk.CTkFrame(bottom_row, fg_color="#161b22", corner_radius=10,
+                                    border_width=1, border_color="#30363d")
+        threat_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        ctk.CTkLabel(threat_card, text="🔍 Threat Detection",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color="#58a6ff").pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkFrame(threat_card, fg_color="#30363d", height=1).pack(fill="x", padx=10)
+
+        self.threat_text = ctk.CTkTextbox(threat_card, fg_color="#0d1117",
+                                           text_color="#f0883e",
+                                           font=ctk.CTkFont(family="Consolas", size=11),
+                                           wrap="word")
+        self.threat_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.threat_text.insert("end", "Loading...")
+        self.threat_text.configure(state="disabled")
 
         # Driver panel
         driver_card = ctk.CTkFrame(bottom_row, fg_color="#161b22", corner_radius=10,
@@ -284,6 +361,9 @@ class AIBootDashboard(ctk.CTk):
         ctk.CTkLabel(bar, text="Auto-refresh: 15s",
                      font=ctk.CTkFont(size=11), text_color="#8b949e").pack(side="right", padx=15)
 
+    # =========================
+    # HELPERS
+    # =========================
     def _make_stat(self, parent, label, value, color):
         frame = ctk.CTkFrame(parent, fg_color="#161b22", corner_radius=10,
                               border_width=1, border_color="#30363d")
@@ -311,6 +391,64 @@ class AIBootDashboard(ctk.CTk):
                           fontsize=10, color='#8b949e', pad=8)
         self.graph_canvas.draw()
 
+    # =========================
+    # REBOOT ACTIONS
+    # =========================
+    def _reboot_now(self):
+        """Show confirmation before rebooting."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Confirm Reboot")
+        dialog.geometry("360x160")
+        dialog.configure(fg_color="#161b22")
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        ctk.CTkLabel(
+            dialog,
+            text="Are you sure you want to reboot now?",
+            font=ctk.CTkFont(size=13),
+            text_color="white",
+            wraplength=300
+        ).pack(pady=(25, 5))
+
+        ctk.CTkLabel(
+            dialog,
+            text="Save all work before proceeding.",
+            font=ctk.CTkFont(size=11),
+            text_color="#8b949e"
+        ).pack(pady=(0, 15))
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack()
+
+        ctk.CTkButton(
+            btn_row,
+            text="Yes, Reboot",
+            fg_color="#f85149",
+            hover_color="#da3633",
+            command=lambda: os.system("shutdown /r /t 10"),
+            width=130
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            btn_row,
+            text="Cancel",
+            fg_color="#21262d",
+            hover_color="#30363d",
+            command=dialog.destroy,
+            width=100
+        ).pack(side="left", padx=8)
+
+    def _ignore_reboot(self):
+        """Ignore reboot suggestion for this session."""
+        self._reboot_ignored = True
+        self.ignored_label.configure(text="⚠ Ignored for this session")
+        self.reboot_btn.configure(state="disabled")
+        self.ignore_btn.configure(state="disabled")
+
+    # =========================
+    # DATA FETCH
+    # =========================
     def start_refresh_thread(self):
         def loop():
             while self.running:
@@ -323,7 +461,6 @@ class AIBootDashboard(ctk.CTk):
         result = {}
 
         # Health
-        
         try:
             health = get_system_health()
             result['health'] = health
@@ -331,6 +468,7 @@ class AIBootDashboard(ctk.CTk):
         except Exception as e:
             print(f"Health error: {e}")
 
+        # Anomaly engine
         try:
             result['anomalies'] = detect_anomalies()
         except Exception as e:
@@ -344,7 +482,7 @@ class AIBootDashboard(ctk.CTk):
                     df['avg_cpu'] = pd.to_numeric(df['avg_cpu'], errors='coerce').fillna(0)
                     df['max_cpu'] = pd.to_numeric(df['max_cpu'], errors='coerce').fillna(0)
                     df['avg_mem'] = pd.to_numeric(df['avg_mem'], errors='coerce').fillna(0)
-                    df['max_mem'] = pd.to_numeric(df.get('max_mem', pd.Series([0])), errors='coerce').fillna(0)
+                    df['max_mem'] = pd.to_numeric(df['max_mem'], errors='coerce').fillna(0)
                     if 'active_procs' not in df.columns:
                         df['active_procs'] = 0
                     df['active_procs'] = pd.to_numeric(df['active_procs'], errors='coerce').fillna(0)
@@ -388,14 +526,19 @@ class AIBootDashboard(ctk.CTk):
                     procs.append(proc.info)
                 except:
                     pass
-            result['procs'] = sorted(procs, key=lambda x: x['memory_percent'], reverse=True)[:8]
+            result['procs'] = sorted(
+                procs, key=lambda x: x['memory_percent'], reverse=True)[:8]
         except Exception as e:
             print(f"Process error: {e}")
 
         return result
 
+    # =========================
+    # UI UPDATE
+    # =========================
     def _update_ui(self, data):
         try:
+            # Health gauge
             if 'health_score' in data:
                 score = data['health_score']
                 health = data['health']
@@ -403,14 +546,6 @@ class AIBootDashboard(ctk.CTk):
                 ram = health['ram_used_percent']
 
                 self.health_gauge.update_value(score, f"CPU:{cpu}% RAM:{ram}%")
-
-                reboot_score = 0
-                if cpu > 85: reboot_score += 30
-                elif cpu > 60: reboot_score += 10
-                if ram > 85: reboot_score += 30
-                elif ram > 60: reboot_score += 10
-                r_status = "Stable" if reboot_score < 30 else "Stressed" if reboot_score < 60 else "REBOOT!"
-                self.reboot_gauge.update_value(reboot_score, r_status)
 
                 cpu_color = "#3fb950" if cpu < 60 else "#f0883e" if cpu < 85 else "#f85149"
                 ram_color = "#3fb950" if ram < 60 else "#f0883e" if ram < 85 else "#f85149"
@@ -423,10 +558,67 @@ class AIBootDashboard(ctk.CTk):
                 self.ram_history.pop(0)
                 self._draw_graph()
 
+            # Reboot intelligence panel
+            if 'anomalies' in data:
+                a = data['anomalies']
+                score = a['reboot_score']
+                status = a['reboot_status']
+
+                # Update reboot gauge
+                gauge_color = "#3fb950" if score < 30 else "#f0883e" if score < 60 else "#f85149"
+                self.reboot_gauge.update_value(score, status)
+
+                # Update status label color
+                label_color = "#3fb950" if score < 30 else "#f0883e" if score < 60 else "#f85149"
+                self.reboot_status_label.configure(
+                    text=f"{'✓' if score < 30 else '⚠'} {status}",
+                    text_color=label_color
+                )
+
+                # Update reboot text panel
+                if not self._reboot_ignored:
+                    self.reboot_text.configure(state="normal")
+                    self.reboot_text.delete("1.0", "end")
+
+                    # Critical anomalies
+                    for msg in a['anomalies']['critical']:
+                        self.reboot_text.insert("end", f"🔴 {msg}\n")
+
+                    # Warning anomalies
+                    for msg in a['anomalies']['warning']:
+                        self.reboot_text.insert("end", f"🟡 {msg}\n")
+
+                    if not a['anomalies']['critical'] and not a['anomalies']['warning']:
+                        self.reboot_text.insert("end", "✓ No issues detected\n")
+
+                    # Score breakdown
+                    if a['score_breakdown']:
+                        self.reboot_text.insert("end", "\n─── Why this score? ───\n")
+                        for reason, pts in a['score_breakdown']:
+                            self.reboot_text.insert("end", f"  +{pts}  {reason}\n")
+
+                    # Recommendations
+                    if a['recommendations']:
+                        self.reboot_text.insert("end", "\n─── Recommendations ───\n")
+                        for r in a['recommendations']:
+                            self.reboot_text.insert("end", f"  → {r}\n")
+
+                    self.reboot_text.configure(state="disabled")
+
+                # Show/hide reboot button based on score
+                if score >= 30 and not self._reboot_ignored:
+                    self.reboot_btn.configure(state="normal")
+                    self.ignore_btn.configure(state="normal")
+                elif not self._reboot_ignored:
+                    self.reboot_btn.configure(state="disabled")
+                    self.ignore_btn.configure(state="disabled")
+
+            # Boot time
             if 'boot_time' in data:
                 self.boot_label.configure(text=f"{data['boot_time']} sec")
                 self.boot_sub.configure(text="Based on last boot summary")
 
+            # Threat detection
             if 'suspicious' in data:
                 suspicious = data['suspicious']
                 self.threat_text.configure(state="normal")
@@ -441,6 +633,7 @@ class AIBootDashboard(ctk.CTk):
                         )
                 self.threat_text.configure(state="disabled")
 
+            # Drivers
             if 'drivers' in data:
                 drivers = data['drivers']
                 flagged = [d for d in drivers if d['flag'] in ['DISABLED', 'MISSING PATH']]
@@ -453,6 +646,7 @@ class AIBootDashboard(ctk.CTk):
                     self.driver_text.insert("end", "✓ All drivers healthy")
                 self.driver_text.configure(state="disabled")
 
+            # Processes
             if 'procs' in data:
                 self.process_text.configure(state="normal")
                 self.process_text.delete("1.0", "end")
