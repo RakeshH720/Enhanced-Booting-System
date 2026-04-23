@@ -8,7 +8,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from boot_logger import get_running_processes, save_smart_logs
-from health_monitor import get_system_health, calculate_health_score
+from core.health_monitor import get_system_health, calculate_health_score
 import pandas as pd
 
 LOG_FILE = "data/health_log.csv"

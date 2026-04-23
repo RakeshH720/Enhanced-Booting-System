@@ -1,5 +1,4 @@
 import psutil
-import datetime
 
 THRESHOLDS = {
     "cpu_critical": 85,
@@ -11,9 +10,6 @@ THRESHOLDS = {
 }
 
 def detect_anomalies():
-    print("Runtime Anomaly Engine")
-    print("=" * 50)
-
     anomalies = []
     recommendations = []
     reboot_score = 0
@@ -56,7 +52,7 @@ def detect_anomalies():
             recommendations.append("Plug in charger soon")
             reboot_score += 10
 
-    # Detect crashed/zombie processes
+    # Zombie processes
     crashed = []
     for proc in psutil.process_iter(['name', 'status']):
         try:
@@ -70,43 +66,21 @@ def detect_anomalies():
         anomalies.append(f"ZOMBIE PROCESSES: {', '.join(crashed[:5])}")
         recommendations.append("Restart affected applications")
 
-    # High memory processes
-    print("\nTop 5 Memory-Hungry Processes:")
-    procs = []
-    for proc in psutil.process_iter(['name', 'memory_percent', 'cpu_percent']):
-        try:
-            procs.append(proc.info)
-        except:
-            pass
-
-    procs = sorted(procs, key=lambda x: x['memory_percent'], reverse=True)[:5]
-    for p in procs:
-        print(f"  {p['name']} | RAM: {round(p['memory_percent'], 2)}% | CPU: {p['cpu_percent']}%")
-
-    # Results
-    print("\nAnomalies Detected:")
-    if anomalies:
-        for a in anomalies:
-            print(f"  {a}")
-    else:
-        print("  No anomalies detected. System is running fine.")
-
-    print("\nRecommendations:")
-    if recommendations:
-        for r in recommendations:
-            print(f"  → {r}")
-    else:
-        print("  → System is stable. No action needed.")
-
-    print(f"\nReboot Score: {reboot_score}/100")
+    # Reboot status
     if reboot_score >= 60:
-        print("REBOOT RECOMMENDED")
+        reboot_status = "REBOOT RECOMMENDED"
     elif reboot_score >= 30:
-        print("REBOOT SUGGESTED — system under stress")
+        reboot_status = "REBOOT SUGGESTED"
     else:
-        print("NO REBOOT NEEDED — system is stable")
+        reboot_status = "STABLE"
 
-    print("=" * 50)
-
-if __name__ == "__main__":
-    detect_anomalies()
+    return {
+        "anomalies": anomalies,
+        "recommendations": recommendations,
+        "reboot_score": reboot_score,
+        "reboot_status": reboot_status,
+        "cpu": cpu,
+        "ram": ram.percent,
+        "disk": disk.percent,
+        "zombie_processes": crashed
+    }

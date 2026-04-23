@@ -6,7 +6,7 @@ DRIVER_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Services"
 def get_driver_status_meaning(start_value):
     meanings = {
         0: "Boot Start",
-        1: "System Start", 
+        1: "System Start",
         2: "Auto Start",
         3: "Manual",
         4: "Disabled"
@@ -14,9 +14,6 @@ def get_driver_status_meaning(start_value):
     return meanings.get(start_value, "Unknown")
 
 def analyze_drivers():
-    print("Driver Health Analyzer")
-    print("=" * 50)
-
     drivers = []
     disabled_count = 0
     auto_count = 0
@@ -82,26 +79,4 @@ def analyze_drivers():
         print(f"Error accessing registry: {e}")
         return []
 
-    print(f"Total Drivers Found : {len(drivers)}")
-    print(f"Critical (Boot)     : {auto_count}")
-    print(f"Disabled            : {disabled_count}")
-    print(f"Missing Path        : {unknown_count}")
-    print(f"OK                  : {len(drivers) - auto_count - disabled_count - unknown_count}")
-    print("=" * 50)
-
-    print("\nSample - First 5 drivers:")
-    for d in drivers[:5]:
-        print(f"  {d['display_name']} | {d['start_type']} | {d['flag']}")
-
-    flagged = [d for d in drivers if d['flag'] in ['DISABLED', 'MISSING PATH']]
-    if flagged:
-        print(f"\nFlagged Drivers ({len(flagged)} found):")
-        for d in flagged[:10]:
-            print(f"  {d['display_name']} | {d['flag']}")
-    else:
-        print("\nNo problematic drivers found.")
-
     return drivers
-
-if __name__ == "__main__":
-    analyze_drivers()
