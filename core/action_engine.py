@@ -2,6 +2,7 @@ import psutil
 import time
 import os
 import json
+from core.learning_engine import get_learned_ignore_list
 
 # =========================
 # CONFIG & WHITELISTS
@@ -19,6 +20,9 @@ SAFE_USER_PROCESSES = {
     "code.exe", "chrome.exe", "firefox.exe", "msedge.exe", 
     "devenv.exe", "pycharm.exe", "obs64.exe"
 }
+
+# Dynamic Memory Injection
+LEARNED_IGNORE_PROCESSES = get_learned_ignore_list()
 
 SYS_ROOT = os.environ.get('SystemRoot', 'c:\\windows').lower()
 SYSTEM_DIRS = [
@@ -51,7 +55,7 @@ def log_action(action_type, details, impact, success):
         with open(ACTION_LOG_FILE, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
-        print(f"Failed to log action: {e}")
+        pass
 
 def can_take_action(action_type):
     global LAST_CPU_ACTION, LAST_RAM_ACTION
@@ -78,7 +82,6 @@ def is_cpu_really_high(threshold):
     return (c1 + c2) / 2 >= threshold
 
 def is_recent_or_child(proc):
-    """Guards against killing the dashboard itself or brand new processes."""
     try:
         if time.time() - proc.create_time() < 10:
             return True
@@ -94,7 +97,11 @@ def is_safe_process(proc):
             return True
 
         name = proc.name().lower()
+        
+        # Static + Dynamic Whitelists
         if name in SYSTEM_PROCESSES or name in SAFE_USER_PROCESSES:
+            return True
+        if name in LEARNED_IGNORE_PROCESSES:
             return True
 
         try:
@@ -114,17 +121,17 @@ def terminate_process(pid):
     try:
         proc = psutil.Process(pid)
         if is_safe_process(proc):
-            return {"status": "blocked", "message": f"Protected process: {proc.name()}"}
+            return {"status": "blocked"}
             
         name = proc.name()
         proc.terminate()
         proc.wait(timeout=3)
-        return {"status": "success", "process": name, "pid": pid, "method": "terminated"}
+        return {"status": "success", "process": name, "pid": pid}
     except psutil.TimeoutExpired:
         proc.kill()
-        return {"status": "success", "process": name, "pid": pid, "method": "force_killed"}
+        return {"status": "success", "process": name, "pid": pid}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error"}
 
 def auto_clear_cpu(threshold_percent=80):
     metrics_before = get_current_metrics()
@@ -170,8 +177,7 @@ def auto_clear_cpu(threshold_percent=80):
         
         if res['status'] != 'success':
             failures += 1
-            if failures >= 2:
-                break
+            if failures >= 2: break
             continue
             
         time.sleep(1.5)
@@ -190,11 +196,7 @@ def auto_clear_cpu(threshold_percent=80):
 
     if actions_taken:
         metrics_after = get_current_metrics()
-        impact = {
-            "total_freed": round(total_cpu_freed, 2),
-            "before": metrics_before,
-            "after": metrics_after
-        }
+        impact = {"total_freed": round(total_cpu_freed, 2), "before": metrics_before, "after": metrics_after}
         batch_success = total_cpu_freed > 5.0 or metrics_after["cpu"] < threshold_percent
         log_action("CPU_CLEAR", actions_taken, impact, batch_success)
         return {"status": "executed", "actions": actions_taken, "impact": impact, "success": batch_success}
@@ -230,8 +232,7 @@ def auto_clear_memory(threshold_percent=85):
         
         if res['status'] != 'success':
             failures += 1
-            if failures >= 2:
-                break
+            if failures >= 2: break
             continue
             
         time.sleep(1.5)
@@ -250,11 +251,7 @@ def auto_clear_memory(threshold_percent=85):
 
     if actions_taken:
         metrics_after = get_current_metrics()
-        impact = {
-            "total_freed": round(total_ram_freed, 2),
-            "before": metrics_before,
-            "after": metrics_after
-        }
+        impact = {"total_freed": round(total_ram_freed, 2), "before": metrics_before, "after": metrics_after}
         batch_success = total_ram_freed > 2.0 or metrics_after["ram"] < threshold_percent
         log_action("RAM_CLEAR", actions_taken, impact, batch_success)
         return {"status": "executed", "actions": actions_taken, "impact": impact, "success": batch_success}
@@ -268,15 +265,14 @@ def run_autopilot(current_health_score=None):
         if current_metrics["cpu"] < 80 and current_metrics["ram"] < 85:
             return {"status": "stable", "message": "System verified stable."}
 
-    cpu_result = auto_clear_cpu(threshold_percent=80)
+    cpu_result = auto_clear_cpu()
     if cpu_result.get('status') == "executed":
         return {"type": "cpu_clear", "data": cpu_result}
 
-    ram_result = auto_clear_memory(threshold_percent=85)
+    ram_result = auto_clear_memory()
     if ram_result.get('status') == "executed":
         return {"type": "ram_clear", "data": ram_result}
         
-    # Return the exact reason it skipped so the UI knows
     if cpu_result.get('status') == 'skipped' and cpu_result.get('reason') != 'threshold_not_met':
         return {"status": "skipped", "message": f"CPU Action Skipped: {cpu_result['reason']}"}
     if ram_result.get('status') == 'skipped' and ram_result.get('reason') != 'threshold_not_met':

@@ -3,11 +3,9 @@ import io
 import datetime
 import threading
 import time
-import math
 import psutil
 import joblib
 import os
-import subprocess
 import pandas as pd
 import customtkinter as ctk
 from matplotlib.figure import Figure
@@ -21,6 +19,7 @@ from core.driver_analyzer import analyze_drivers
 from core.ml_model import load_threat_data, detect_threats, load_model
 from core.anomaly_engine import detect_anomalies
 from core.action_engine import run_autopilot
+from core.learning_engine import analyze_and_learn
 
 # =========================
 # PROFESSIONAL UI THEME OVERRIDE
@@ -29,14 +28,14 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 # HUD Color Palette
-BG_COLOR = "#050505"         # Pure deep black
-CARD_COLOR = "#0F0F11"       # Slightly elevated black for panels
-ACCENT_BLUE = "#00E5FF"      # Cyber/Neon Blue
-ACCENT_GREEN = "#00FF41"     # Matrix Green
-ACCENT_RED = "#FF003C"       # Alert Red
-ACCENT_WARN = "#FFB000"      # Warning Orange
-TEXT_MAIN = "#FFFFFF"        # Crisp White
-TEXT_MUTED = "#A1A1AA"       # Brighter Zinc Grey for high visibility
+BG_COLOR = "#050505"         
+CARD_COLOR = "#0F0F11"       
+ACCENT_BLUE = "#00E5FF"      
+ACCENT_GREEN = "#00FF41"     
+ACCENT_RED = "#FF003C"       
+ACCENT_WARN = "#FFB000"      
+TEXT_MAIN = "#FFFFFF"        
+TEXT_MUTED = "#A1A1AA"       
 
 # Stealth Matplotlib Styling
 plt.rcParams['figure.facecolor'] = CARD_COLOR
@@ -125,6 +124,8 @@ class AIBootDashboard(ctk.CTk):
         self._driver_cache = None
         self._driver_last_scan = 0
         self._reboot_ignored = False
+        
+        self.cycle_count = 0 # Added for throttled learning
 
         self.build_ui()
         threading.Thread(target=self._preload, daemon=True).start()
@@ -142,7 +143,7 @@ class AIBootDashboard(ctk.CTk):
             from retrain import run_retrain
             silent(run_retrain)
         except Exception as e:
-            print(f"Retrain check error: {e}")
+            pass
 
         self.after(0, self.start_refresh_thread)
 
@@ -150,7 +151,7 @@ class AIBootDashboard(ctk.CTk):
     # BUILD UI
     # =========================
     def build_ui(self):
-        # Stealth Title Bar
+        # Title Bar
         title_frame = ctk.CTkFrame(self, fg_color=BG_COLOR, corner_radius=0, height=60)
         title_frame.pack(fill="x", pady=(10, 0))
         title_frame.pack_propagate(False)
@@ -163,7 +164,6 @@ class AIBootDashboard(ctk.CTk):
         status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
         status_frame.pack(side="right", padx=25)
         
-        # Simple live indicator
         ctk.CTkLabel(status_frame, text="●", font=ctk.CTkFont(size=18), text_color=ACCENT_GREEN).pack(side="left", padx=(0, 6))
         ctk.CTkLabel(status_frame, text="LIVE", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
 
@@ -285,7 +285,7 @@ class AIBootDashboard(ctk.CTk):
         bottom_row = ctk.CTkFrame(right, fg_color="transparent")
         bottom_row.pack(fill="both", expand=True)
 
-        # Custom built Threat/Autopilot Card to hold the dynamic status label
+        # Threat/Autopilot Card
         threat_card = ctk.CTkFrame(bottom_row, fg_color=CARD_COLOR, corner_radius=8)
         threat_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
@@ -293,7 +293,10 @@ class AIBootDashboard(ctk.CTk):
                      font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=15, pady=(15, 2))
         
         self.agent_status_label = ctk.CTkLabel(threat_card, text="Monitoring system...", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"), text_color=TEXT_MUTED)
-        self.agent_status_label.pack(anchor="w", padx=15, pady=(0, 5))
+        self.agent_status_label.pack(anchor="w", padx=15, pady=(0, 2))
+
+        self.learning_label = ctk.CTkLabel(threat_card, text="", font=ctk.CTkFont(family="Consolas", size=11), text_color=ACCENT_BLUE)
+        self.learning_label.pack(anchor="w", padx=15, pady=(0, 5))
 
         self.threat_text = ctk.CTkTextbox(threat_card, fg_color=BG_COLOR, text_color=TEXT_MAIN, font=ctk.CTkFont(family="Consolas", size=13), border_width=0, wrap="word")
         self.threat_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -410,6 +413,17 @@ class AIBootDashboard(ctk.CTk):
         except Exception as e:
             pass
 
+        # Autopilot Learning Engine Execution
+        try:
+            self.cycle_count += 1
+            # Run learning engine every 4th cycle (~1 minute)
+            if self.cycle_count % 4 == 0:
+                learning_result = silent(analyze_and_learn)
+                if learning_result.get('status') == 'success':
+                    result['learned_ignore'] = learning_result.get('learned_processes', [])
+        except Exception as e:
+            pass
+
         try:
             if self._predictor_model and os.path.exists(SUMMARY_FILE):
                 df = pd.read_csv(SUMMARY_FILE).tail(1)
@@ -471,6 +485,18 @@ class AIBootDashboard(ctk.CTk):
                 self.ram_history.append(ram)
                 self.ram_history.pop(0)
                 self._draw_graph()
+
+                # Learning UI Update (Anti-flicker)
+                if 'learned_ignore' in data:
+                    learned_list = data['learned_ignore']
+                    if learned_list:
+                        display_list = ", ".join(learned_list[:3])
+                        if len(learned_list) > 3:
+                            display_list += f" (+{len(learned_list)-3} more)"
+                        
+                        new_text = f"🧠 Learned to ignore: {display_list}"
+                        if self.learning_label.cget("text") != new_text:
+                            self.learning_label.configure(text=new_text)
 
                 # ==========================================
                 # AUTOPILOT UX INTEGRATION
