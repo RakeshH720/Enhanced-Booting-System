@@ -54,48 +54,61 @@ def silent(func, *args, **kwargs):
 # =========================
 # GAUGE WIDGET 
 # =========================
+# =========================
+# GAUGE WIDGET 
+# =========================
 class GaugeCanvas(ctk.CTkFrame):
     def __init__(self, parent, title, color, **kwargs):
-        super().__init__(parent, fg_color=CARD_COLOR, corner_radius=8, border_width=0, **kwargs)
+        super().__init__(parent, fg_color=CARD_COLOR, corner_radius=12, border_width=1, border_color="#1D2D50", **kwargs)
         self.color = color
-        self._last_value = -1
-        self._arc = None
-        self._value_text = None
-        self._sub_text = None
+        self._target_value = 0.0
+        self._current_value = 0.0  
+        
+        self.canvas = ctk.CTkCanvas(self, bg=CARD_COLOR, highlightthickness=0, width=180, height=120)
+        self.canvas.pack(pady=(15, 0), expand=True)
 
-        self.canvas = ctk.CTkCanvas(self, bg=CARD_COLOR, highlightthickness=0, width=220, height=140)
-        self.canvas.pack(pady=(15, 0))
-
-        ctk.CTkLabel(self, text=title, font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+        ctk.CTkLabel(self, text=title, font=ctk.CTkFont(family="Inter", size=12, weight="bold"),
                      text_color=TEXT_MUTED).pack(pady=(0, 10))
 
-        self.canvas.after(100, self._draw_background)
+        self._draw_background()
+        self._animate_loop() 
 
     def _draw_background(self):
-        self.canvas.create_arc(25, 10, 195, 140, start=0, extent=180,
-                               style="arc", outline="#1A1A1A", width=8)
+        self.canvas.create_arc(20, 20, 160, 160, start=0, extent=180,
+                               style="arc", outline="#1D2D50", width=12)
         self._value_text = self.canvas.create_text(
-            110, 100, text="--", font=("Inter", 42, "bold"), fill=TEXT_MAIN
-        )
-        self._sub_text = self.canvas.create_text(
-            110, 130, text="", font=("Consolas", 11), fill=TEXT_MUTED
+            90, 85, text="0", font=("Inter", 32, "bold"), fill=TEXT_MAIN
         )
         self._arc = self.canvas.create_arc(
-            25, 10, 195, 140, start=180, extent=0,
-            style="arc", outline=self.color, width=8
+            20, 20, 160, 160, start=180, extent=0,
+            style="arc", outline=self.color, width=12
         )
 
-    def update_value(self, value, subtitle=""):
-        if value == self._last_value:
-            return
-        self._last_value = value
-        if self._arc is None:
-            return
-        extent = int((value / 100) * 180)
-        self.canvas.itemconfig(self._arc, extent=-extent)
-        self.canvas.itemconfig(self._value_text, text=str(int(value)))
-        self.canvas.itemconfig(self._sub_text, text=subtitle)
+    def update_color(self, color):
+        self.color = color
+        if hasattr(self, "_arc") and self._arc is not None:
+            self.canvas.itemconfig(self._arc, outline=color)
 
+    def update_value(self, target_value, subtitle=""):
+        self._target_value = target_value
+
+    def _animate_loop(self):
+        self._target_value = max(0, min(100, self._target_value))
+        self._current_value = max(0, min(100, self._current_value))
+        
+        diff = self._target_value - self._current_value
+        
+        if abs(diff) < 0.5:
+            self._current_value = self._target_value
+        else:
+            self._current_value += diff * 0.15 
+
+        if hasattr(self, '_arc') and self._arc is not None:
+            extent = int((self._current_value / 100) * 180)
+            self.canvas.itemconfig(self._arc, extent=-extent)
+            self.canvas.itemconfig(self._value_text, text=f"{int(self._current_value)}")
+            
+        self.after(33, self._animate_loop)
 # =========================
 # MAIN DASHBOARD
 # =========================
@@ -599,16 +612,43 @@ class AIBootDashboard(ctk.CTk):
                 self.threat_text.insert("1.0", "✓ No threats detected\nSystem running normally.\n\nAutopilot is standing by.")
                 self.threat_text.configure(state="disabled")
 
-            reboot_score = state['reboot_score']
-            severity = state.get('severity', 'NORMAL')
-            
-            gauge_color = ACCENT_GREEN if severity == "NORMAL" else ACCENT_WARN if severity == "WARNING" else ACCENT_RED
-            self.reboot_gauge.update_value(reboot_score, severity)
+            # ================= SRE REBOOT INTELLIGENCE =================
+            failures = state.get("consecutive_failures", 0)
+            recovery_start = state.get("recovery_start_time")
 
-            label_color = ACCENT_GREEN if severity == "NORMAL" else ACCENT_WARN if severity == "WARNING" else ACCENT_RED
-            status_icon = "✓" if severity == "NORMAL" else "⚠" if severity == "WARNING" else "🔴"
-            self.reboot_status_label.configure(text=f"{status_icon} {severity} ({reboot_score} pts)", text_color=label_color)
+            if failures >= 3:
+                status = "CRITICAL"
+                color = ACCENT_RED
+                icon = "🔴"
+            elif failures == 2:
+                status = "HIGH RISK"
+                color = "#FF8C00"
+                icon = "🟠"
+            elif failures == 1:
+                status = "RECOVERING"
+                color = ACCENT_WARN
+                icon = "🟡"
+            else:
+                status = "STABLE"
+                color = ACCENT_GREEN
+                icon = "🟢"
 
+            if recovery_start and failures > 0:
+                remaining = max(0, 5 - int(time.time() - recovery_start))
+                message = f"{icon} {status}: Stabilizing... ({remaining}s)"
+            elif failures > 0:
+                message = f"{icon} {status}: Active threat detected."
+            else:
+                message = f"{icon} SYSTEM STABLE: Autopilot standing by."
+
+            # 🔥 APPLY TO UI
+            self.reboot_status_label.configure(text=message, text_color=color)
+
+            # 🔥 THIS is where your lines go
+            gauge_value = min(100, failures * 33)
+
+            self.reboot_gauge.update_color(color)
+            self.reboot_gauge.update_value(gauge_value)
             if not self._reboot_ignored:
                 self.reboot_text.configure(state="normal")
                 self.reboot_text.delete("1.0", "end")
@@ -626,13 +666,13 @@ class AIBootDashboard(ctk.CTk):
 
                 self.reboot_text.configure(state="disabled")
 
-            if reboot_score >= 30 and not self._reboot_ignored:
+            if failures >= 1 and not self._reboot_ignored:
                 self.reboot_btn.configure(state="normal")
-                self.ignore_btn.configure(state="normal")
+                self.ignorebtn.configure(state="normal")
             elif not self._reboot_ignored:
                 self.reboot_btn.configure(state="disabled")
                 self.ignore_btn.configure(state="disabled")
-
+                
             if 'boot_time' in data:
                 self.boot_label.configure(text=f"{data['boot_time']} sec")
                 self.boot_sub.configure(text="Based on last boot summary")
