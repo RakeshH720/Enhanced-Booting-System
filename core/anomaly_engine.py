@@ -1,6 +1,66 @@
 import psutil
 import winreg
+from collections import deque
 
+# ==========================================
+# 🧠 DYNAMIC BASELINE ENGINE
+# ==========================================
+class DynamicAnomalyDetector:
+    def __init__(self, window_size=20):
+        self.cpu_history = deque(maxlen=window_size)
+        self.mem_history = deque(maxlen=window_size)
+
+    def update_metrics(self, cpu, memory):
+        self.cpu_history.append(cpu)
+        self.mem_history.append(memory)
+
+    def get_baseline(self):
+        if len(self.cpu_history) == 0:
+            return 0, 0
+        avg_cpu = sum(self.cpu_history) / len(self.cpu_history)
+        avg_mem = sum(self.mem_history) / len(self.mem_history)
+        return avg_cpu, avg_mem
+
+    def detect_anomaly(self, cpu, memory):
+        # Startup Guard: Wait for minimum data
+        if len(self.cpu_history) < 5:
+            return 0, [("Collecting baseline data...", 0)]
+
+        avg_cpu, avg_mem = self.get_baseline()
+        deviation_threshold = 1.5
+        
+        score = 0
+        breakdown = []
+
+        # CPU Deviation Check
+        if cpu > (avg_cpu * deviation_threshold) and cpu > 40:
+            pts = 10
+            score += pts
+            breakdown.append((f"CPU Spike: {round(cpu)}% vs baseline {avg_cpu:.1f}%", pts))
+        elif cpu > 85: # Absolute Fallback
+            pts = 15
+            score += pts
+            breakdown.append(("CPU Critical: Sustained > 85%", pts))
+
+        # RAM Deviation Check
+        if memory > (avg_mem * deviation_threshold) and memory > 40:
+            pts = 10
+            score += pts
+            breakdown.append((f"RAM Spike: {round(memory)}% vs baseline {avg_mem:.1f}%", pts))
+        elif memory > 85: # Absolute Fallback
+            pts = 15
+            score += pts
+            breakdown.append(("RAM Critical: Sustained > 85%", pts))
+
+        return score, breakdown
+
+# Initialize global instance for the session
+detector = DynamicAnomalyDetector(window_size=20)
+
+
+# ==========================================
+# 🔧 STATIC SYSTEM CHECKS
+# ==========================================
 def check_pending_reboot():
     reboot_keys = [
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
@@ -25,16 +85,6 @@ def check_all_disks():
     except: pass
     return issues
 
-def eval_cpu(long_cpu):
-    if long_cpu > 85: return 15, "CPU Critical"
-    if long_cpu > 60: return 5, "CPU Warning"
-    return 0, None
-
-def eval_ram(health):
-    if health['ram_used_percent'] > 85: return 15, "RAM Critical"
-    if health['ram_used_percent'] > 70: return 5, "RAM Warning"
-    return 0, None
-
 def eval_disk():
     issues = check_all_disks()
     score = 0
@@ -54,17 +104,33 @@ def eval_uptime(uptime_days):
     if uptime_days > 1: return 2, "Uptime > 1 day"
     return 0, None
 
+# ==========================================
+# ⚡ MAIN EVALUATION LOOP
+# ==========================================
 def calculate_raw_score(health, long_cpu, uptime_days, pending_reboot):
     score = 0
     breakdown = []
     recommendations = []
 
-    c_score, c_msg = eval_cpu(long_cpu)
-    if c_score: score += c_score; breakdown.append((c_msg, c_score)); recommendations.append("High CPU Load detected.")
-    
-    r_score, r_msg = eval_ram(health)
-    if r_score: score += r_score; breakdown.append((r_msg, r_score)); recommendations.append("Free up RAM immediately.")
-    
+    current_cpu = health['cpu_percent']
+    current_ram = health['ram_used_percent']
+
+    # 1. Evaluate current state AGAINST the clean baseline FIRST
+    dyn_score, dyn_breakdown = detector.detect_anomaly(current_cpu, current_ram)
+
+    # 2. THEN update the baseline (keeps spikes from normalizing themselves)
+    detector.update_metrics(current_cpu, current_ram)
+
+    if dyn_score > 0:
+        score += dyn_score
+        for msg, pts in dyn_breakdown:
+            if pts > 0: 
+                breakdown.append((msg, pts))
+        
+        if any("Spike" in msg for msg, pts in dyn_breakdown):
+            recommendations.append("Abnormal resource deviation detected.")
+
+    # 3. Static infrastructure checks
     d_score, d_msgs = eval_disk()
     if d_score:
         score += d_score
@@ -82,4 +148,16 @@ def calculate_raw_score(health, long_cpu, uptime_days, pending_reboot):
         breakdown.append(("Pending Windows Update", 15))
         recommendations.append("Restart to apply updates.")
 
-    return {"reboot_score": score, "breakdown": breakdown, "recommendations": recommendations}
+    # 4. Determine Severity Status
+    severity = "NORMAL"
+    if score >= 30:
+        severity = "CRITICAL"
+    elif score >= 15:
+        severity = "WARNING"
+
+    return {
+        "reboot_score": score,
+        "severity": severity,
+        "breakdown": breakdown,
+        "recommendations": recommendations
+    }

@@ -112118,3 +112118,15 @@ timestamp,name,cpu_percent,memory_percent,status
 2026-04-23 07:42:10,EpicGamesLauncher.exe,11.7,0.81,running
 2026-04-23 07:42:10,ONENOTEM.EXE,0.0,0.02,running
 2026-04-23 07:42:10,SDXHelper.exe,0.2,0.2,running
+keylogger32.exe,45.0,8.5,running,2026-04-24 14:39:28
+cryptominer.exe,89.0,12.0,running,2026-04-24 14:39:28
+unknown_service.exe,34.0,6.2,running,2026-04-24 14:39:28
+suspicious_task.exe,56.0,9.8,running,2026-04-24 14:39:28
+keylogger32.exe,45.0,8.5,running,2026-04-24 14:40:46
+cryptominer.exe,89.0,12.0,running,2026-04-24 14:40:46
+unknown_service.exe,34.0,6.2,running,2026-04-24 14:40:46
+suspicious_task.exe,56.0,9.8,running,2026-04-24 14:40:46
+keylogger32.exe,45.0,8.5,running,2026-04-24 15:02:10
+cryptominer.exe,89.0,12.0,running,2026-04-24 15:02:10
+unknown_service.exe,34.0,6.2,running,2026-04-24 15:02:10
+suspicious_task.exe,56.0,9.8,running,2026-04-24 15:02:10

@@ -11,6 +11,7 @@ import customtkinter as ctk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
+from collections import deque
 
 # Connect to the core brain (10/10 Architecture)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,6 +19,12 @@ from core.decision_engine import evaluate_system_state
 from core.driver_analyzer import analyze_drivers
 from core.learning_engine import get_learned_ignore_list
 from core.ml_model import load_model
+
+# Import the simulator
+try:
+    from simulate import cpu_stress, ram_stress
+except ImportError:
+    pass
 
 # =========================
 # PROFESSIONAL UI THEME OVERRIDE
@@ -32,6 +39,7 @@ ACCENT_BLUE = "#00E5FF"
 ACCENT_GREEN = "#00FF41"     
 ACCENT_RED = "#FF003C"       
 ACCENT_WARN = "#FFB000"      
+ACCENT_PURPLE = "#8A2BE2"    # Demo Button Color
 TEXT_MAIN = "#FFFFFF"        
 TEXT_MUTED = "#A1A1AA"       
 
@@ -114,8 +122,17 @@ class AIBootDashboard(ctk.CTk):
         self.configure(fg_color=BG_COLOR)
         self.running = True
 
-        self.cpu_history = [0] * 30
-        self.ram_history = [0] * 30
+        # Initialize empty history
+        self.cpu_history = deque(maxlen=30)
+        self.ram_history = deque(maxlen=30)
+
+        # 🔥 Pre-fill graph with current real values (fast)
+        cpu = psutil.cpu_percent(interval=None)
+        ram = psutil.virtual_memory().percent
+
+        for _ in range(10):
+            self.cpu_history.append(cpu)
+            self.ram_history.append(ram)
 
         self._anomaly_model = None
         self._predictor_model = None
@@ -131,9 +148,8 @@ class AIBootDashboard(ctk.CTk):
             self._anomaly_model = load_model()
             if os.path.exists(PREDICTOR_MODEL):
                 self._predictor_model = joblib.load(PREDICTOR_MODEL)
-            print("Models loaded.")
         except Exception as e:
-            print(f"Model load error: {e}")
+            pass
 
         try:
             from retrain import run_retrain
@@ -143,7 +159,6 @@ class AIBootDashboard(ctk.CTk):
 
         self.after(0, self.start_refresh_thread)
 
-    # Local UI helper to format the generic health gauge
     def _calculate_health_score(self, data):
         score = 100
         if data['cpu_percent'] > 80: score -= 25
@@ -155,10 +170,32 @@ class AIBootDashboard(ctk.CTk):
         return max(score, 0)
 
     # =========================
+    # SIMULATION TRIGGER
+    # =========================
+    def _run_simulation(self):
+        self.demo_btn.configure(state="disabled", text="⚠️ Spiking System...", fg_color=ACCENT_WARN, text_color="#000000")
+        
+        def stress_thread():
+            try:
+                c_thread = threading.Thread(target=cpu_stress, args=(60,))
+                r_thread = threading.Thread(target=ram_stress, args=(60,))
+                c_thread.start()
+                r_thread.start()
+                c_thread.join()
+                r_thread.join()
+            except Exception as e:
+                print(f"Simulation Error: {e}")
+            
+            self.after(0, lambda: self.demo_btn.configure(
+                state="normal", text="🧪 Simulate Spike", fg_color=ACCENT_PURPLE, text_color=TEXT_MAIN
+            ))
+
+        threading.Thread(target=stress_thread, daemon=True).start()
+
+    # =========================
     # BUILD UI
     # =========================
     def build_ui(self):
-        # Title Bar
         title_frame = ctk.CTkFrame(self, fg_color=BG_COLOR, corner_radius=0, height=60)
         title_frame.pack(fill="x", pady=(10, 0))
         title_frame.pack_propagate(False)
@@ -171,10 +208,17 @@ class AIBootDashboard(ctk.CTk):
         status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
         status_frame.pack(side="right", padx=25)
         
+        self.demo_btn = ctk.CTkButton(
+            status_frame, text="🧪 Simulate Spike", 
+            font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
+            fg_color=ACCENT_PURPLE, text_color=TEXT_MAIN, hover_color="#6A1B9A",
+            command=self._run_simulation, height=32, width=140
+        )
+        self.demo_btn.pack(side="left", padx=(0, 20))
+
         ctk.CTkLabel(status_frame, text="●", font=ctk.CTkFont(size=18), text_color=ACCENT_GREEN).pack(side="left", padx=(0, 6))
         ctk.CTkLabel(status_frame, text="LIVE", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
 
-        # --- MASTER AUTOPILOT TOGGLE ---
         self.autopilot_var = ctk.BooleanVar(value=True) 
         self.autopilot_switch = ctk.CTkSwitch(
             status_frame, 
@@ -188,13 +232,9 @@ class AIBootDashboard(ctk.CTk):
         )
         self.autopilot_switch.pack(side="left", padx=(20, 0))
 
-        # Main container
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # =========================
-        # LEFT COLUMN
-        # =========================
         left = ctk.CTkFrame(main, fg_color="transparent", width=380)
         left.pack(side="left", fill="y", padx=(0, 15))
         left.pack_propagate(False)
@@ -265,9 +305,6 @@ class AIBootDashboard(ctk.CTk):
         self.ignored_label = ctk.CTkLabel(reboot_card, text="", font=ctk.CTkFont(family="Consolas", size=12), text_color=TEXT_MUTED)
         self.ignored_label.pack(pady=(0, 10))
 
-        # =========================
-        # RIGHT COLUMN
-        # =========================
         right = ctk.CTkFrame(main, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
@@ -287,12 +324,11 @@ class AIBootDashboard(ctk.CTk):
         self.ax.spines['right'].set_visible(False)
         self.ax.spines['left'].set_color('#1A1A1A')
         self.ax.spines['bottom'].set_color('#1A1A1A')
-        self._draw_graph()
+        self.after(100, self._draw_graph)
 
         bottom_row = ctk.CTkFrame(right, fg_color="transparent")
         bottom_row.pack(fill="both", expand=True)
 
-        # Threat/Autopilot Card
         threat_card = ctk.CTkFrame(bottom_row, fg_color=CARD_COLOR, corner_radius=8)
         threat_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
@@ -327,7 +363,7 @@ class AIBootDashboard(ctk.CTk):
 
         self.last_update = ctk.CTkLabel(bar, text="Last updated: --", font=ctk.CTkFont(family="Consolas", size=13), text_color=TEXT_MUTED)
         self.last_update.pack(side="left", padx=25)
-        ctk.CTkLabel(bar, text="Auto-refresh: 15s", font=ctk.CTkFont(family="Consolas", size=13), text_color=TEXT_MUTED).pack(side="right", padx=25)
+        ctk.CTkLabel(bar, text="Auto-refresh: 1s", font=ctk.CTkFont(family="Consolas", size=13), text_color=TEXT_MUTED).pack(side="right", padx=25)
 
     def _make_stat(self, parent, label, value, color):
         frame = ctk.CTkFrame(parent, fg_color=CARD_COLOR, corner_radius=8)
@@ -346,19 +382,39 @@ class AIBootDashboard(ctk.CTk):
         tb.configure(state="disabled")
         card.textbox = tb
         return card
-
+    
     def _draw_graph(self):
         self.ax.clear()
-        x = list(range(30))
-        
-        self.ax.plot(x, self.cpu_history, color=ACCENT_WARN, linewidth=2, label='CPU %')
-        self.ax.fill_between(x, self.cpu_history, alpha=0.08, color=ACCENT_WARN)
-        self.ax.plot(x, self.ram_history, color=ACCENT_BLUE, linewidth=2, label='RAM %')
-        self.ax.fill_between(x, self.ram_history, alpha=0.15, color=ACCENT_BLUE)
-        
+
+        # Raw data
+        cpu_raw = list(self.cpu_history)
+        ram_raw = list(self.ram_history)
+
+    # 🌊 Smoothing
+        def smooth(data):
+            result = []
+            for i in range(len(data)):
+                window = data[max(0, i-2):i+1]
+                result.append(sum(window) / len(window))
+            return result
+
+        cpu_plot = smooth(cpu_raw)
+        ram_plot = smooth(ram_raw)
+
+        # ✅ NOW define x (after cpu_plot exists)
+        x = list(range(len(cpu_plot)))
+
+        # Plot
+        self.ax.plot(x, cpu_plot, color=ACCENT_WARN, linewidth=2, label='CPU %')
+        self.ax.fill_between(x, cpu_plot, alpha=0.08, color=ACCENT_WARN)
+
+        self.ax.plot(x, ram_plot, color=ACCENT_BLUE, linewidth=2, label='RAM %')
+        self.ax.fill_between(x, ram_plot, alpha=0.15, color=ACCENT_BLUE)
+
         self.ax.set_ylim(0, 100)
-        self.ax.set_xlim(0, 29)
-        
+        self.ax.set_xlim(0, max(29, len(cpu_plot)-1))
+
+
         self.ax.legend(loc='upper right', fontsize=10, facecolor=CARD_COLOR, edgecolor=CARD_COLOR, labelcolor=TEXT_MAIN)
         self.ax.grid(True, alpha=0.2, color='#1A1A1A', linestyle='--')
         
@@ -406,21 +462,18 @@ class AIBootDashboard(ctk.CTk):
             while self.running:
                 data = self._fetch_data()
                 self.after(0, lambda d=data: self._update_ui(d))
-                time.sleep(15)
+                time.sleep(2)
         threading.Thread(target=loop, daemon=True).start()
 
     def _fetch_data(self):
         result = {}
         try:
-            # 1. CORE BRAIN: Call the decoupled decision engine
             state = evaluate_system_state(autopilot_enabled=self.autopilot_var.get())
             result['state'] = state
             result['health'] = state['health']
             
-            # 2. Add the learning list for the UI label
             result['learned_ignore'] = list(get_learned_ignore_list())
 
-            # 3. Boot Predictor
             if self._predictor_model and os.path.exists(SUMMARY_FILE):
                 df = pd.read_csv(SUMMARY_FILE).tail(1)
                 if not df.empty:
@@ -436,14 +489,12 @@ class AIBootDashboard(ctk.CTk):
                     features = df[['avg_cpu', 'max_cpu', 'avg_mem', 'max_mem', 'active_procs', 'hour', 'cpu_spike']]
                     result['boot_time'] = round(self._predictor_model.predict(features)[0], 1)
 
-            # 4. Drivers
             now = time.time()
             if self._driver_cache is None or (now - self._driver_last_scan) > 300:
                 self._driver_cache = silent(analyze_drivers)
                 self._driver_last_scan = now
             result['drivers'] = self._driver_cache
 
-            # 5. Top Processes
             procs = []
             for proc in psutil.process_iter(['name', 'memory_percent', 'cpu_percent']):
                 try: procs.append(proc.info)
@@ -463,7 +514,6 @@ class AIBootDashboard(ctk.CTk):
             state = data['state']
             health = data['health']
             
-            # Health gauge & Core Stats
             score = self._calculate_health_score(health)
             cpu = health['cpu_percent']
             ram = health['ram_used_percent']
@@ -472,16 +522,14 @@ class AIBootDashboard(ctk.CTk):
 
             cpu_color = ACCENT_GREEN if cpu < 60 else ACCENT_WARN if cpu < 85 else ACCENT_RED
             ram_color = ACCENT_BLUE if ram < 60 else ACCENT_WARN if ram < 85 else ACCENT_RED
-            self.cpu_stat.value_label.configure(text=f"{cpu}%", text_color=cpu_color)
-            self.ram_stat.value_label.configure(text=f"{ram}%", text_color=ram_color)
+            self.cpu_stat.value_label.configure(text=f"{cpu:.1f}%", text_color=cpu_color)
+            self.ram_stat.value_label.configure(text=f"{ram:.1f}%", text_color=ram_color)
 
+            # FIXED: deque handles bounds automatically
             self.cpu_history.append(cpu)
-            self.cpu_history.pop(0)
             self.ram_history.append(ram)
-            self.ram_history.pop(0)
             self._draw_graph()
 
-            # Learning UI Update
             if 'learned_ignore' in data:
                 learned_list = data['learned_ignore']
                 if learned_list:
@@ -493,9 +541,6 @@ class AIBootDashboard(ctk.CTk):
                     if self.learning_label.cget("text") != new_text:
                         self.learning_label.configure(text=new_text)
 
-            # ==========================================
-            # AUTOPILOT UX INTEGRATION
-            # ==========================================
             autopilot_result = state.get('autopilot_feedback')
             
             if not self.autopilot_var.get():
@@ -540,7 +585,6 @@ class AIBootDashboard(ctk.CTk):
                     elif "stable" in reason or "no targets" in reason:
                         self.agent_status_label.configure(text="✓ System Stable", text_color=ACCENT_GREEN)
                         
-                    # FIX: Clear "Loading..." when skipping/stable
                     self.threat_text.configure(state="normal")
                     self.threat_text.delete("1.0", "end")
                     self.threat_text.insert("1.0", "✓ No threats detected\nSystem running normally.\n\nAutopilot is standing by.")
@@ -548,22 +592,20 @@ class AIBootDashboard(ctk.CTk):
 
             else:
                 self.agent_status_label.configure(text="✓ System Stable", text_color=ACCENT_GREEN)
-                # FIX: Clear "Loading..." when fully stable and Autopilot is asleep
                 self.threat_text.configure(state="normal")
                 self.threat_text.delete("1.0", "end")
                 self.threat_text.insert("1.0", "✓ No threats detected\nSystem running normally.\n\nAutopilot is standing by.")
                 self.threat_text.configure(state="disabled")
 
-                
-            # Reboot intelligence panel
             reboot_score = state['reboot_score']
-            reboot_status = state['reboot_status']
+            severity = state.get('severity', 'NORMAL')
+            
+            gauge_color = ACCENT_GREEN if severity == "NORMAL" else ACCENT_WARN if severity == "WARNING" else ACCENT_RED
+            self.reboot_gauge.update_value(reboot_score, severity)
 
-            gauge_color = ACCENT_GREEN if reboot_score < 30 else ACCENT_WARN if reboot_score < 60 else ACCENT_RED
-            self.reboot_gauge.update_value(reboot_score, reboot_status)
-
-            label_color = ACCENT_GREEN if reboot_score < 30 else ACCENT_WARN if reboot_score < 60 else ACCENT_RED
-            self.reboot_status_label.configure(text=f"{'✓' if reboot_score < 30 else '⚠'} {reboot_status}", text_color=label_color)
+            label_color = ACCENT_GREEN if severity == "NORMAL" else ACCENT_WARN if severity == "WARNING" else ACCENT_RED
+            status_icon = "✓" if severity == "NORMAL" else "⚠" if severity == "WARNING" else "🔴"
+            self.reboot_status_label.configure(text=f"{status_icon} {severity} ({reboot_score} pts)", text_color=label_color)
 
             if not self._reboot_ignored:
                 self.reboot_text.configure(state="normal")
@@ -575,9 +617,10 @@ class AIBootDashboard(ctk.CTk):
                 else:
                     self.reboot_text.insert("end", "✓ No issues detected\n")
 
-                if state['score_breakdown']:
+                # FIXED: Aligned backend dictionary key
+                if state.get('breakdown'):
                     self.reboot_text.insert("end", "\n─── Why this score? ───\n")
-                    for reason, pts in state['score_breakdown']: 
+                    for reason, pts in state['breakdown']: 
                         self.reboot_text.insert("end", f"  {'+' if pts > 0 else ''}{pts}  {reason}\n")
 
                 self.reboot_text.configure(state="disabled")
@@ -589,12 +632,10 @@ class AIBootDashboard(ctk.CTk):
                 self.reboot_btn.configure(state="disabled")
                 self.ignore_btn.configure(state="disabled")
 
-            # Boot time
             if 'boot_time' in data:
                 self.boot_label.configure(text=f"{data['boot_time']} sec")
                 self.boot_sub.configure(text="Based on last boot summary")
 
-            # Drivers (Final Production-Grade Intelligence Layer)
             if 'driver_data' in state:
                 drivers = state['driver_data']['drivers']
                 summary = state['driver_data']['summary']
@@ -640,7 +681,6 @@ class AIBootDashboard(ctk.CTk):
                     
                 self.driver_text.configure(state="disabled")
 
-            # Processes
             if 'procs' in data:
                 self.process_text.configure(state="normal")
                 self.process_text.delete("1.0", "end")

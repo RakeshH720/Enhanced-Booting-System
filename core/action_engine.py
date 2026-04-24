@@ -119,7 +119,17 @@ def auto_clear_memory():
 
 def run_autopilot():
     cpu_res = auto_clear_cpu()
-    if cpu_res.get('status') == 'executed': return cpu_res
+    if cpu_res.get('status') == 'executed':
+        return cpu_res
+
     ram_res = auto_clear_memory()
-    if ram_res.get('status') == 'executed': return ram_res
-    return {"status": "stable", "message": "Monitoring system..."}
+    if ram_res.get('status') == 'executed':
+        return ram_res
+
+    # Pass cooldown messages properly
+    if "Cooldown" in cpu_res.get('message', ''):
+        return cpu_res
+    if "Cooldown" in ram_res.get('message', ''):
+        return ram_res
+
+    return {"status": "skipped", "message": "No targets found"}
