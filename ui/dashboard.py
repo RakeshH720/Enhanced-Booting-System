@@ -12,14 +12,12 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
-# Connect to the core brain
+# Connect to the core brain (10/10 Architecture)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.health_monitor import get_system_health, calculate_health_score
+from core.decision_engine import evaluate_system_state
 from core.driver_analyzer import analyze_drivers
-from core.ml_model import load_threat_data, detect_threats, load_model
-from core.anomaly_engine import detect_anomalies
-from core.action_engine import run_autopilot
-from core.learning_engine import analyze_and_learn
+from core.learning_engine import get_learned_ignore_list
+from core.ml_model import load_model
 
 # =========================
 # PROFESSIONAL UI THEME OVERRIDE
@@ -124,8 +122,6 @@ class AIBootDashboard(ctk.CTk):
         self._driver_cache = None
         self._driver_last_scan = 0
         self._reboot_ignored = False
-        
-        self.cycle_count = 0 # Added for throttled learning
 
         self.build_ui()
         threading.Thread(target=self._preload, daemon=True).start()
@@ -146,6 +142,17 @@ class AIBootDashboard(ctk.CTk):
             pass
 
         self.after(0, self.start_refresh_thread)
+
+    # Local UI helper to format the generic health gauge
+    def _calculate_health_score(self, data):
+        score = 100
+        if data['cpu_percent'] > 80: score -= 25
+        elif data['cpu_percent'] > 50: score -= 10
+        if data['ram_used_percent'] > 85: score -= 25
+        elif data['ram_used_percent'] > 60: score -= 10
+        if data['disk_used_percent'] > 90: score -= 20
+        elif data['disk_used_percent'] > 70: score -= 10
+        return max(score, 0)
 
     # =========================
     # BUILD UI
@@ -306,6 +313,9 @@ class AIBootDashboard(ctk.CTk):
         driver_card = self._make_log_card(bottom_row, "🔧 Driver Health", TEXT_MUTED)
         driver_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
         self.driver_text = driver_card.textbox
+        self.driver_text.tag_config("red", foreground="#FF003C")
+        self.driver_text.tag_config("yellow", foreground="#FFB000")
+        self.driver_text.tag_config("green", foreground="#00FF41")
 
         proc_card = self._make_log_card(bottom_row, "💾 Top Memory Processes", ACCENT_BLUE)
         proc_card.pack(side="left", fill="both", expand=True)
@@ -402,29 +412,15 @@ class AIBootDashboard(ctk.CTk):
     def _fetch_data(self):
         result = {}
         try:
-            health = get_system_health()
-            result['health'] = health
-            result['health_score'] = calculate_health_score(health)
-        except Exception as e:
-            pass
+            # 1. CORE BRAIN: Call the decoupled decision engine
+            state = evaluate_system_state(autopilot_enabled=self.autopilot_var.get())
+            result['state'] = state
+            result['health'] = state['health']
+            
+            # 2. Add the learning list for the UI label
+            result['learned_ignore'] = list(get_learned_ignore_list())
 
-        try:
-            result['anomalies'] = detect_anomalies()
-        except Exception as e:
-            pass
-
-        # Autopilot Learning Engine Execution
-        try:
-            self.cycle_count += 1
-            # Run learning engine every 4th cycle (~1 minute)
-            if self.cycle_count % 4 == 0:
-                learning_result = silent(analyze_and_learn)
-                if learning_result.get('status') == 'success':
-                    result['learned_ignore'] = learning_result.get('learned_processes', [])
-        except Exception as e:
-            pass
-
-        try:
+            # 3. Boot Predictor
             if self._predictor_model and os.path.exists(SUMMARY_FILE):
                 df = pd.read_csv(SUMMARY_FILE).tail(1)
                 if not df.empty:
@@ -439,163 +435,209 @@ class AIBootDashboard(ctk.CTk):
                     df['cpu_spike'] = df['max_cpu'] - df['avg_cpu']
                     features = df[['avg_cpu', 'max_cpu', 'avg_mem', 'max_mem', 'active_procs', 'hour', 'cpu_spike']]
                     result['boot_time'] = round(self._predictor_model.predict(features)[0], 1)
-        except Exception as e:
-            pass
 
-        try:
+            # 4. Drivers
             now = time.time()
             if self._driver_cache is None or (now - self._driver_last_scan) > 300:
                 self._driver_cache = silent(analyze_drivers)
                 self._driver_last_scan = now
             result['drivers'] = self._driver_cache
-        except Exception as e:
-            pass
 
-        try:
+            # 5. Top Processes
             procs = []
             for proc in psutil.process_iter(['name', 'memory_percent', 'cpu_percent']):
-                try:
-                    procs.append(proc.info)
-                except:
-                    pass
+                try: procs.append(proc.info)
+                except: pass
             result['procs'] = sorted(procs, key=lambda x: x['memory_percent'], reverse=True)[:8]
-        except Exception as e:
-            pass
 
+        except Exception as e:
+            print(f"Fetch Error: {e}")
+            
         return result
 
     def _update_ui(self, data):
         try:
+            if 'state' not in data:
+                return
+                
+            state = data['state']
+            health = data['health']
+            
             # Health gauge & Core Stats
-            if 'health_score' in data:
-                score = data['health_score']
-                health = data['health']
-                cpu = health['cpu_percent']
-                ram = health['ram_used_percent']
+            score = self._calculate_health_score(health)
+            cpu = health['cpu_percent']
+            ram = health['ram_used_percent']
 
-                self.health_gauge.update_value(score, f"CPU:{cpu}% RAM:{ram}%")
+            self.health_gauge.update_value(score, f"CPU:{cpu}% RAM:{ram}%")
 
-                cpu_color = ACCENT_GREEN if cpu < 60 else ACCENT_WARN if cpu < 85 else ACCENT_RED
-                ram_color = ACCENT_BLUE if ram < 60 else ACCENT_WARN if ram < 85 else ACCENT_RED
-                self.cpu_stat.value_label.configure(text=f"{cpu}%", text_color=cpu_color)
-                self.ram_stat.value_label.configure(text=f"{ram}%", text_color=ram_color)
+            cpu_color = ACCENT_GREEN if cpu < 60 else ACCENT_WARN if cpu < 85 else ACCENT_RED
+            ram_color = ACCENT_BLUE if ram < 60 else ACCENT_WARN if ram < 85 else ACCENT_RED
+            self.cpu_stat.value_label.configure(text=f"{cpu}%", text_color=cpu_color)
+            self.ram_stat.value_label.configure(text=f"{ram}%", text_color=ram_color)
 
-                self.cpu_history.append(cpu)
-                self.cpu_history.pop(0)
-                self.ram_history.append(ram)
-                self.ram_history.pop(0)
-                self._draw_graph()
+            self.cpu_history.append(cpu)
+            self.cpu_history.pop(0)
+            self.ram_history.append(ram)
+            self.ram_history.pop(0)
+            self._draw_graph()
 
-                # Learning UI Update (Anti-flicker)
-                if 'learned_ignore' in data:
-                    learned_list = data['learned_ignore']
-                    if learned_list:
-                        display_list = ", ".join(learned_list[:3])
-                        if len(learned_list) > 3:
-                            display_list += f" (+{len(learned_list)-3} more)"
-                        
-                        new_text = f"🧠 Learned to ignore: {display_list}"
-                        if self.learning_label.cget("text") != new_text:
-                            self.learning_label.configure(text=new_text)
-
-                # ==========================================
-                # AUTOPILOT UX INTEGRATION
-                # ==========================================
-                if not self.autopilot_var.get():
-                    self.agent_status_label.configure(text="⏸ Autopilot Disabled by User", text_color=TEXT_MUTED)
-                else:
-                    autopilot_result = run_autopilot(score)
+            # Learning UI Update
+            if 'learned_ignore' in data:
+                learned_list = data['learned_ignore']
+                if learned_list:
+                    display_list = ", ".join(learned_list[:3])
+                    if len(learned_list) > 3:
+                        display_list += f" (+{len(learned_list)-3} more)"
                     
-                    if autopilot_result.get('status') == "executed":
-                        ap_data = autopilot_result['data']
-                        impact = ap_data['impact']
-                        actions = ap_data['actions']
-                        
-                        primary_target = actions[0]['process'] if actions else "Process"
-                        status_color = ACCENT_GREEN if ap_data.get('success') else ACCENT_WARN
-                        
-                        self.agent_status_label.configure(
-                            text=f"⚡ Action Taken: {primary_target} terminated", text_color=status_color
-                        )
-                        
-                        self.threat_text.configure(state="normal")
-                        self.threat_text.delete("1.0", "end")
-                        self.threat_text.insert("1.0", f"\n[AUTOPILOT: {autopilot_result['type'].upper()}]\n")
-                        
-                        metric = "CPU" if "cpu" in autopilot_result['type'] else "RAM"
-                        before_val = impact['before'][metric.lower()]
-                        after_val = impact['after'][metric.lower()]
-                        self.threat_text.insert("end", f"📉 {metric} reduced: {before_val}% → {after_val}%\n")
-                        
-                        for action in actions:
-                            icon = "✓" if action['success'] else "⚠"
-                            self.threat_text.insert("end", f"  {icon} {action['process']} (Freed {action['freed']}%)\n")
-                                
-                        self.threat_text.insert("end", "-"*35 + "\n")
-                        self.threat_text.configure(state="disabled")
+                    new_text = f"🧠 Learned to ignore: {display_list}"
+                    if self.learning_label.cget("text") != new_text:
+                        self.learning_label.configure(text=new_text)
 
-                    elif autopilot_result.get('status') == "skipped":
-                        reason = autopilot_result.get('message', '').lower()
-                        if "cooldown" in reason:
-                            self.agent_status_label.configure(text="⏱ Cooldown active (60s)", text_color=TEXT_MUTED)
-                        elif "transient" in reason:
-                            self.agent_status_label.configure(text="👀 Monitoring transient spike...", text_color=ACCENT_WARN)
-                        elif "stable" in reason:
-                            self.agent_status_label.configure(text="✓ System Stable", text_color=ACCENT_GREEN)
+            # ==========================================
+            # AUTOPILOT UX INTEGRATION
+            # ==========================================
+            autopilot_result = state.get('autopilot_feedback')
+            
+            if not self.autopilot_var.get():
+                self.agent_status_label.configure(text="⏸ Autopilot Disabled by User", text_color=TEXT_MUTED)
+            elif autopilot_result:
+                if autopilot_result.get('status') == "executed":
+                    ap_data = autopilot_result['data'] if 'data' in autopilot_result else autopilot_result
+                    impact = ap_data['impact']
+                    actions = ap_data['actions']
+                    
+                    primary_target = actions[0]['process'] if actions else "Process"
+                    status_color = ACCENT_GREEN if ap_data.get('success', True) else ACCENT_WARN
+                    
+                    self.agent_status_label.configure(
+                        text=f"⚡ Action Taken: {primary_target} terminated", text_color=status_color
+                    )
+                    
+                    self.threat_text.configure(state="normal")
+                    self.threat_text.delete("1.0", "end")
+                    action_type = autopilot_result.get('type', 'system').upper()
+                    self.threat_text.insert("1.0", f"\n[AUTOPILOT: {action_type}]\n")
+                    
+                    metric = "CPU" if "cpu" in action_type.lower() else "RAM"
+                    before_val = impact['before'].get(metric.lower(), 100)
+                    after_val = impact['after'].get(metric.lower(), 100)
+                    self.threat_text.insert("end", f"📉 {metric} reduced: {before_val}% → {after_val}%\n")
+                    
+                    for action in actions:
+                        icon = "✓" if action.get('success', True) else "⚠"
+                        freed = action.get('freed', 0)
+                        self.threat_text.insert("end", f"  {icon} {action['process']} (Freed {freed}%)\n")
+                            
+                    self.threat_text.insert("end", "-"*35 + "\n")
+                    self.threat_text.configure(state="disabled")
 
+                elif autopilot_result.get('status') == "skipped":
+                    reason = autopilot_result.get('message', '').lower()
+                    if "cooldown" in reason:
+                        self.agent_status_label.configure(text="⏱ Cooldown active (60s)", text_color=TEXT_MUTED)
+                    elif "transient" in reason:
+                        self.agent_status_label.configure(text="👀 Monitoring transient spike...", text_color=ACCENT_WARN)
+                    elif "stable" in reason or "no targets" in reason:
+                        self.agent_status_label.configure(text="✓ System Stable", text_color=ACCENT_GREEN)
+                        
+                    # FIX: Clear "Loading..." when skipping/stable
+                    self.threat_text.configure(state="normal")
+                    self.threat_text.delete("1.0", "end")
+                    self.threat_text.insert("1.0", "✓ No threats detected\nSystem running normally.\n\nAutopilot is standing by.")
+                    self.threat_text.configure(state="disabled")
+
+            else:
+                self.agent_status_label.configure(text="✓ System Stable", text_color=ACCENT_GREEN)
+                # FIX: Clear "Loading..." when fully stable and Autopilot is asleep
+                self.threat_text.configure(state="normal")
+                self.threat_text.delete("1.0", "end")
+                self.threat_text.insert("1.0", "✓ No threats detected\nSystem running normally.\n\nAutopilot is standing by.")
+                self.threat_text.configure(state="disabled")
+
+                
             # Reboot intelligence panel
-            if 'anomalies' in data:
-                a = data['anomalies']
-                score = a['reboot_score']
-                status = a['reboot_status']
+            reboot_score = state['reboot_score']
+            reboot_status = state['reboot_status']
 
-                gauge_color = ACCENT_GREEN if score < 30 else ACCENT_WARN if score < 60 else ACCENT_RED
-                self.reboot_gauge.update_value(score, status)
+            gauge_color = ACCENT_GREEN if reboot_score < 30 else ACCENT_WARN if reboot_score < 60 else ACCENT_RED
+            self.reboot_gauge.update_value(reboot_score, reboot_status)
 
-                label_color = ACCENT_GREEN if score < 30 else ACCENT_WARN if score < 60 else ACCENT_RED
-                self.reboot_status_label.configure(text=f"{'✓' if score < 30 else '⚠'} {status}", text_color=label_color)
+            label_color = ACCENT_GREEN if reboot_score < 30 else ACCENT_WARN if reboot_score < 60 else ACCENT_RED
+            self.reboot_status_label.configure(text=f"{'✓' if reboot_score < 30 else '⚠'} {reboot_status}", text_color=label_color)
 
-                if not self._reboot_ignored:
-                    self.reboot_text.configure(state="normal")
-                    self.reboot_text.delete("1.0", "end")
+            if not self._reboot_ignored:
+                self.reboot_text.configure(state="normal")
+                self.reboot_text.delete("1.0", "end")
 
-                    for msg in a['anomalies']['critical']: self.reboot_text.insert("end", f"🔴 {msg}\n")
-                    for msg in a['anomalies']['warning']: self.reboot_text.insert("end", f"🟡 {msg}\n")
-                    if not a['anomalies']['critical'] and not a['anomalies']['warning']: self.reboot_text.insert("end", "✓ No issues detected\n")
+                if state['recommendations']:
+                    for r in state['recommendations']: 
+                        self.reboot_text.insert("end", f"🔴 {r}\n")
+                else:
+                    self.reboot_text.insert("end", "✓ No issues detected\n")
 
-                    if a['score_breakdown']:
-                        self.reboot_text.insert("end", "\n─── Why this score? ───\n")
-                        for reason, pts in a['score_breakdown']: self.reboot_text.insert("end", f"  +{pts}  {reason}\n")
+                if state['score_breakdown']:
+                    self.reboot_text.insert("end", "\n─── Why this score? ───\n")
+                    for reason, pts in state['score_breakdown']: 
+                        self.reboot_text.insert("end", f"  {'+' if pts > 0 else ''}{pts}  {reason}\n")
 
-                    if a['recommendations']:
-                        self.reboot_text.insert("end", "\n─── Recommendations ───\n")
-                        for r in a['recommendations']: self.reboot_text.insert("end", f"  → {r}\n")
+                self.reboot_text.configure(state="disabled")
 
-                    self.reboot_text.configure(state="disabled")
-
-                if score >= 30 and not self._reboot_ignored:
-                    self.reboot_btn.configure(state="normal")
-                    self.ignore_btn.configure(state="normal")
-                elif not self._reboot_ignored:
-                    self.reboot_btn.configure(state="disabled")
-                    self.ignore_btn.configure(state="disabled")
+            if reboot_score >= 30 and not self._reboot_ignored:
+                self.reboot_btn.configure(state="normal")
+                self.ignore_btn.configure(state="normal")
+            elif not self._reboot_ignored:
+                self.reboot_btn.configure(state="disabled")
+                self.ignore_btn.configure(state="disabled")
 
             # Boot time
             if 'boot_time' in data:
                 self.boot_label.configure(text=f"{data['boot_time']} sec")
                 self.boot_sub.configure(text="Based on last boot summary")
 
-            # Drivers
-            if 'drivers' in data:
-                drivers = data['drivers']
-                flagged = [d for d in drivers if d['flag'] in ['DISABLED', 'MISSING PATH']]
+            # Drivers (Final Production-Grade Intelligence Layer)
+            if 'driver_data' in state:
+                drivers = state['driver_data']['drivers']
+                summary = state['driver_data']['summary']
+                ratio = summary.get('severity_ratio', 0)
+                
                 self.driver_text.configure(state="normal")
                 self.driver_text.delete("1.0", "end")
-                self.driver_text.insert("end", f"Total : {len(drivers)}  |  Flagged : {len(flagged)}\n\n")
-                for d in flagged[:8]:
-                    self.driver_text.insert("end", f"⚠ {d['display_name'][:28]}\n  {d['flag']}\n\n")
-                if not flagged:
-                    self.driver_text.insert("end", "✓ All drivers healthy")
+                
+                if summary['total'] == 0:
+                    self.driver_text.insert("end", "⚠️ No driver signatures detected.\nCheck system permissions.")
+                else:
+                    self.driver_text.insert("end", f"TOTAL SCANNED: {summary['total']}\n")
+                    self.driver_text.insert("end", f"FLAGGED: {summary['flagged']} | RATIO: {ratio:.2f}\n")
+                    
+                    if ratio > 0.15:
+                        self.driver_text.insert("end", "STATUS: 🔴 SYSTEM DEGRADATION\n", "red")
+                        self.driver_text.insert("end", "INSIGHT: Critical registry rot. High orphaned driver count likely impacting boot latency.\n\n")
+                    elif ratio > 0.05:
+                        self.driver_text.insert("end", "STATUS: 🟡 MINOR INSTABILITY\n", "yellow")
+                        self.driver_text.insert("end", "INSIGHT: Moderate orphaned drivers found. Monitoring for potential system conflicts.\n\n")
+                    elif summary['flagged'] > 0:
+                        self.driver_text.insert("end", "STATUS: 🟢 HEALTHY (MINOR NOISE)\n", "green")
+                        self.driver_text.insert("end", "INSIGHT: Negligible registry noise. Overall system integrity remains high.\n\n")
+                    
+                    self.driver_text.insert("end", f"PRIMARY THREAT: {summary['top_issue']} (Dominant Type)\n")
+                    self.driver_text.insert("end", "—" * 32 + "\n")
+                    
+                    for d in drivers[:8]:
+                        if d['flag'] == "MISSING PATH": icon = "❌"
+                        elif d['flag'] == "DISABLED": icon = "⚠️"
+                        else: icon = "ℹ️"
+                        
+                        if d['severity'] >= 4: sev_label = "HIGH"
+                        elif d['severity'] >= 1: sev_label = "MEDIUM"
+                        else: sev_label = "LOW"
+                        
+                        self.driver_text.insert("end", f"{icon} {d['display_name'][:25]}\n")
+                        self.driver_text.insert("end", f"   TYPE: {d['start_type']} | IMPACT: {sev_label}\n\n")
+                        
+                    if summary['flagged'] == 0:
+                        self.driver_text.insert("end", "✓ SYSTEM INTEGRITY NOMINAL\n", "green")
+                        self.driver_text.insert("end", "All registry drivers mapped to valid image paths.")
+                    
                 self.driver_text.configure(state="disabled")
 
             # Processes
